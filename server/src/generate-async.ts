@@ -74,10 +74,13 @@ async function runGeneration(jobId: string, req: GenerateRequest): Promise<void>
 
     const patched = structuredClone(workflow.raw);
 
+    // Patch the prompt through the input name the introspector resolved, so a
+    // Qwen node (`prompt`) and a stock CLIPTextEncode node (`text`) both work
+    // without this code knowing which model is in use.
     const posNode = patched[workflow.nodes.positive]!;
-    posNode.inputs.prompt = enriched.positive;
-    if (enriched.negative && "negative_prompt" in posNode.inputs) {
-      posNode.inputs.negative_prompt = enriched.negative;
+    posNode.inputs[workflow.nodes.positivePromptInput] = enriched.positive;
+    if (enriched.negative && workflow.nodes.negativePromptInput) {
+      posNode.inputs[workflow.nodes.negativePromptInput] = enriched.negative;
     }
 
     const sampler = patched[workflow.nodes.sampler]!;

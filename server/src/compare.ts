@@ -60,10 +60,12 @@ export async function runArm(
     enriched = buildEnrichedPrompt(prompt, memories);
   }
 
+  // Patch via the resolved input name — see generate-async.ts. This keeps the
+  // A/B comparison working across models without duplicating the logic.
   const posNode = patched[workflow.nodes.positive]!;
-  posNode.inputs.prompt = enriched.positive;
-  if (enriched.negative && "negative_prompt" in posNode.inputs) {
-    posNode.inputs.negative_prompt = enriched.negative;
+  posNode.inputs[workflow.nodes.positivePromptInput] = enriched.positive;
+  if (enriched.negative && workflow.nodes.negativePromptInput) {
+    posNode.inputs[workflow.nodes.negativePromptInput] = enriched.negative;
   }
 
   // Seed and size are pinned by the caller — never taken from rotation state.
