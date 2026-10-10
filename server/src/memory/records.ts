@@ -364,6 +364,12 @@ export async function listTraits(): Promise<LearnedTrait[]> {
     }));
 }
 
+/** Remove a learned trait from memory. */
+export async function deleteTrait(memosNodeId: string): Promise<boolean> {
+  const memos = await getMemOS();
+  return memos.forget(memosNodeId);
+}
+
 /** Extract a field value from the structured content string. */
 function extractField(content: string, field: string): string | null {
   const match = content.match(new RegExp(`${field}:\\s*(.+)`, "i"));

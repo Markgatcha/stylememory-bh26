@@ -153,10 +153,67 @@ export async function fetchGallery(): Promise<GenerationRecord[]> {
   return res.json() as Promise<GenerationRecord[]>;
 }
 
-export async function submitFeedback(id: string, feedback: "up" | "down", note?: string): Promise<void> {
-  await fetch(`/api/generate/${id}/feedback`, {
+/** What the server decided to do with a feedback submission. */
+export interface FeedbackOutcome {
+  ok: boolean;
+  outcome: "stored" | "quarantined" | "ignored";
+  trait?: string;
+  quarantineId?: string;
+  message: string;
+}
+
+export async function submitFeedback(id: string, feedback: "up" | "down", note?: string): Promise<FeedbackOutcome> {
+  const res = await fetch(`/api/generate/${id}/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ feedback, note }),
   });
+  return res.json() as Promise<FeedbackOutcome>;
+}
+
+// ─── Quarantine (M3) ──────────────────────────────────────────────────────
+
+export interface QuarantineItem {
+  id: string;
+  createdAt: number;
+  kind: "avoid" | "prefer";
+  text: string;
+  rawNote: string | null;
+  generationId: string;
+  generationPrompt: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+}
+
+export async function fetchQuarantine(): Promise<QuarantineItem[]> {
+  const res = await fetch("/api/quarantine");
+  return res.json() as Promise<QuarantineItem[]>;
+}
+
+export async function approveQuarantine(id: string): Promise<void> {
+  await fetch(`/api/quarantine/${id}/approve`, { method: "POST" });
+}
+
+export async function rejectQuarantine(id: string): Promise<void> {
+  await fetch(`/api/quarantine/${id}/reject`, { method: "POST" });
+}
+
+// ─── Traits (M3) ──────────────────────────────────────────────────────────
+
+export interface LearnedTrait {
+  id: string;
+  memosNodeId: string;
+  kind: "avoid" | "prefer";
+  text: string;
+  sourceGenerationId: string;
+  createdAt: number;
+}
+
+export async function fetchTraits(): Promise<LearnedTrait[]> {
+  const res = await fetch("/api/traits");
+  return res.json() as Promise<LearnedTrait[]>;
+}
+
+export async function deleteTrait(memosNodeId: string): Promise<void> {
+  await fetch(`/api/traits/${memosNodeId}`, { method: "DELETE" });
 }

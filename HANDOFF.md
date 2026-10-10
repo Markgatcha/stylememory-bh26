@@ -11,46 +11,80 @@ Last updated: Fri Oct 9, 2026 ~11:30 PM EDT (mid-M2)
 - Vite + React + Tailwind UI shell on port 5173
 - ComfyUI probe (v0.39.0 reachable)
 
-### M1 — Generate ✓
+### M1 — Generate ✓ (`259c6bc`)
 - `workflow/qwen-image.json` — API-format workflow flattened from the user's
   ComfyUI UI-format file (`qwen21_gguf_fast.json`). Node IDs were READ from
   that file, never invented. Uses `qwen-image-2.1-turbo-Q5_0.gguf`.
-- `POST /api/generate` — loads workflow, patches prompt/seed/steps/size,
-  queues to ComfyUI `/prompt`, polls `/history/{id}`, downloads image via
-  `/view`, saves to `data/images/`, appends to `data/generations.json`
-- `GET /api/gallery` + `GET /images/:filename` — gallery with image serving
-- Progress: elapsed-seconds counter in the UI button during generation.
-  **NOTE: real-time WebSocket progress bar is NOT wired yet** — see Known Issues.
-- **Verified:** 2 generations completed end-to-end (memory ON + OFF),
-  both images are real PNGs on disk, served via HTTP 200.
+- `POST /api/generate` — introspects the workflow, patches
+  prompt/seed/steps/size, queues to ComfyUI, polls history, downloads the
+  image, saves it to the gallery with a JSON index entry
+- `GET /api/gallery` + `GET /images/:filename`
+- Progress: elapsed-seconds counter in the UI.
+  **Real-time WebSocket progress bar is NOT wired** — see Known Issues.
+- Verified: multiple generations completed end-to-end, real PNGs on disk,
+  served over HTTP 200.
 
-### M2 — Characters & Styles ✓
-- `POST/GET /api/characters`, `PUT /api/characters/:id` — CRUD with
-  MemOS storage. Tags: `["character", "character:<name>"]`
-- `POST/GET /api/styles`, `PUT /api/styles/:id` — CRUD with MemOS storage.
-  Tags: `["style", "style:<name>"]`
-- Edits use `supersede()` — old node gets `validTo` set, history preserved
-- `recallMemories()` — whole-word case-insensitive name match FIRST
-  (`reason: "character-name"`), then tag search, then full-text search.
-  Active "avoid" traits always included.
-- `buildEnrichedPrompt()` — merges recalled memories into the POSITIVE prompt.
-  CFG 1 means negatives are ignored, so "avoid" traits are rewritten as
-  positive counter-phrasings (e.g. "neon" → "muted, desaturated colors").
-- UI shows: final prompt, negative prompt, seed, size, and the list of
-  memories used (with kind + recall reason)
-- **Verified:** "Kai" recalled by name match, merged into prompt, image
-  shows spiky blue hair + red jacket + worn jeans (visually confirmed).
-  Memory OFF with same seed produces unenriched prompt — valid A/B.
+### M2 — Characters & Styles ✓ (`11fb8e1`)
+- Characters and styles CRUD in the UI, stored in MemOS
+  (namespace "stylememory", tags as discriminators)
+- Edits use `supersede()` — history preserved
+- Recall: whole-word name match first, then relevance-thresholded text search
+- Enriched prompt: memories merged into the POSITIVE prompt (CFG 1 ignores
+  negatives; avoid traits rewritten as positive counter-phrasings)
+- UI shows final prompt, negative prompt, seed, size, and memories used
+- Memory OFF toggle for before/after comparison (same seed)
+- Verified: "Kai" recalled by name and merged into the prompt
 
-## What's Next (M3)
+### M3 — Feedback, learned traits, quarantine ✓
+- Thumbs up/down with an optional note on any gallery image
+- Feedback routing (`server/src/memory/feedback.ts`):
+  - rendering complaint → stored as an `avoid` trait in MemOS
+  - explicit praise with a note → stored as a `prefer` trait
+  - references a defining attribute (hair/eyes/outfit/…) → **quarantined**
+  - no note, or a generic note ("bad", "ok") → ignored, nothing learned
+- Quarantine screen: approve writes the trait into MemOS, reject discards it.
+  Approved/rejected history is kept. Double-resolving returns 404.
+- Traits tab lists learned avoid/prefer traits with delete (`forget()`)
+- Avoid traits are always-on: every generation rewrites them into the
+  POSITIVE prompt (CFG 1 workaround) and into the negative node
+- Verified end-to-end: all five routing outcomes exercised over HTTP;
+  quarantine confirmed to gate an identity-touching note out of memory
+  until approved; approve → present in memory; approve twice → 404.
 
-- Thumbs up/down on gallery images → write learned traits to MemOS
-  (thumbs-up = importance boost via `update()`, thumbs-down = candidate
-  "avoid" trait)
-- Quarantine screen: feedback that looks wrong/contradictory goes to a
-  review list, not straight into memory
-- `POST /api/generate/:id/feedback` already exists (stores feedback on the
-  generation record) but does NOT yet write to MemOS — that's M3 work
+### Post-M3 fixes (all traced to root cause)
+- `8983740` Seed rotation: unpinned generations take lastSeed+1 from a
+  persistent counter; pinned seeds (A/B) bypass it.
+- `7a243a7` Memory contamination: removed an importance-ranked recall
+  fallback that returned a constant score of 1.0 for every node, which was
+  injecting the top character into every unrelated prompt.
+- `03bd911` Removed `--fast fp8_matrix_mult` from the ComfyUI launch flags —
+  FP8 matmuls were degrading image quality. See `docs/comfyui-launch-flags.md`.
+- `e2d3efb` Steps 25 → 8 for the Turbo checkpoint. The distilled 8-step
+  sigma schedule is baked into the checkpoint; 25 steps starved the
+  fine-detail phase (sharp ground, under-denoised fur).
+
+## What's Next (M4)
+
+- Memory inspector: browse every stored memory (characters, styles, traits),
+  see its content/tags/metadata, and view version history for superseded
+  character edits (`getGraph()` / `searchTemporal()`)
+- Memory OFF vs ON **side-by-side** with an identical pinned seed and size,
+  showing both final prompts next to both images. The single-toggle A/B
+  already exists in the API (`memoryOff`, `seed`); what is missing is the
+  two-up view and the automatic seed pinning so the comparison is honest.
+
+### Rubric notes (Banana Hacks 2026 scoring criteria)
+
+- **Row C (Image AI theme):** already at the top band. Remove the memory
+  engine and generation has nothing to condition on — the product stops
+  working. Nothing to add.
+- **Row A (Technical execution):** the multi-step pipeline (recall → prompt
+  build → ComfyUI → feedback → re-store) plus the CFG-1 positive-prompt
+  negation and supersede-based versioning is the evidence here. M4's
+  side-by-side makes it legible to a judge in one screen.
+- **Row E (Design/demo):** the 3-minute demo should lead with M4's
+  side-by-side — same seed, memory off vs on — because it proves the
+  memory engine is load-bearing rather than decorative.
 
 ## How to Run
 

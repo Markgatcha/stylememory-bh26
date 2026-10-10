@@ -12,11 +12,12 @@ import { loadWorkflow } from "./comfyui/introspect.js";
 import { appendGeneration, loadGenerations, updateGeneration } from "./generations.js";
 import {
   storeCharacter, updateCharacter, storeStyle, updateStyle,
-  recallMemories, listCharacters, listStyles, listTraits,
+  recallMemories, listCharacters, listStyles, listTraits, deleteTrait,
   type RecalledMemory,
 } from "./memory/records.js";
 import { buildEnrichedPrompt } from "./prompt/builder.js";
 import { nextSeed } from "./seed-state.js";
+import { processFeedback, listQuarantine, approveQuarantine, rejectQuarantine } from "./memory/feedback.js";
 
 ensureDirs();
 
@@ -56,7 +57,7 @@ app.get("/api/health", async (c) => {
 
   const payload: HealthResponse = {
     status: comfyui.reachable && supersedeSupport ? "ok" : "degraded",
-    milestone: "M2",
+    milestone: "M3",
     comfyui: { reachable: comfyui.reachable, version: comfyui.version, url: COMFYUI_URL, error: comfyui.error },
     memos: { ready: true, count: memosCount, dbPath: NAMESPACE },
     workflow: { loaded: workflowLoaded, file: WORKFLOW_FILE },
@@ -269,17 +270,56 @@ app.put("/api/styles/:id", async (c) => {
 
 app.get("/api/traits", async (c) => c.json(await listTraits()));
 
-// ─── Feedback ─────────────────────────────────────────────────────────────
+app.delete("/api/traits/:nodeId", async (c) => {
+  const ok = await deleteTrait(c.req.param("nodeId"));
+  if (!ok) return c.json({ error: "trait not found" }, 404);
+  return c.json({ ok: true });
+});
+
+// ─── Feedback (M3) ─────────────────────────────────────────────────────────
 
 app.post("/api/generate/:id/feedback", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json<{ feedback: "up" | "down"; note?: string }>();
-  const ok = updateGeneration(id, {
+
+  const gens = loadGenerations();
+  const gen = gens.find((g) => g.id === id);
+  if (!gen) return c.json({ error: "generation not found" }, 404);
+
+  // Record the raw vote on the generation regardless of what we learn from it.
+  updateGeneration(id, {
     feedback: body.feedback,
     feedbackNote: body.note ?? null,
   });
-  if (!ok) return c.json({ error: "generation not found" }, 404);
-  return c.json({ ok: true });
+
+  // Derive a trait — stored directly, quarantined, or ignored as low-signal.
+  const result = await processFeedback({
+    generationId: id,
+    generationPrompt: gen.prompt,
+    feedback: body.feedback,
+    note: body.note ?? null,
+  });
+
+  return c.json({ ok: true, ...result });
+});
+
+// ─── Quarantine (M3) ───────────────────────────────────────────────────────
+
+app.get("/api/quarantine", (c) => {
+  const status = c.req.query("status") as "pending" | "approved" | "rejected" | undefined;
+  return c.json(listQuarantine(status));
+});
+
+app.post("/api/quarantine/:id/approve", async (c) => {
+  const item = await approveQuarantine(c.req.param("id"));
+  if (!item) return c.json({ error: "quarantine item not found or already resolved" }, 404);
+  return c.json(item);
+});
+
+app.post("/api/quarantine/:id/reject", (c) => {
+  const item = rejectQuarantine(c.req.param("id"));
+  if (!item) return c.json({ error: "quarantine item not found or already resolved" }, 404);
+  return c.json(item);
 });
 
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) }, (info) => {

@@ -18,6 +18,7 @@ data/*.db-shm
 data/*.db-wal
 data/generations.json
 data/seed-state.json
+data/quarantine.json
 data/images/*
 !data/images/.gitkeep
 

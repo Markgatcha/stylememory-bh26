@@ -3,11 +3,13 @@ import {
   fetchHealth, fetchCharacters, fetchStyles, fetchGallery,
   createCharacter, updateCharacter, createStyle, updateStyle,
   generate, submitFeedback,
+  fetchQuarantine, approveQuarantine, rejectQuarantine, fetchTraits, deleteTrait,
   type HealthResponse, type Character, type StyleProfile,
   type GenerationRecord, type GenerateResult,
+  type QuarantineItem, type LearnedTrait,
 } from "./api";
 
-type Tab = "generate" | "characters" | "styles" | "gallery";
+type Tab = "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits";
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -24,6 +26,8 @@ export default function App() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [styles, setStyles] = useState<StyleProfile[]>([]);
   const [gallery, setGallery] = useState<GenerationRecord[]>([]);
+  const [quarantine, setQuarantine] = useState<QuarantineItem[]>([]);
+  const [traits, setTraits] = useState<LearnedTrait[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,23 +43,31 @@ export default function App() {
   }, []);
 
   const reload = useCallback(async () => {
-    const [c, s, g] = await Promise.all([
+    const [c, s, g, q, t] = await Promise.all([
       fetchCharacters().catch(() => []),
       fetchStyles().catch(() => []),
       fetchGallery().catch(() => []),
+      fetchQuarantine().catch(() => []),
+      fetchTraits().catch(() => []),
     ]);
     setCharacters(c);
     setStyles(s);
     setGallery(g);
+    setQuarantine(q);
+    setTraits(t);
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const pendingCount = quarantine.filter((q) => q.status === "pending").length;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "generate", label: "Generate" },
     { key: "characters", label: `Characters (${characters.length})` },
     { key: "styles", label: `Styles (${styles.length})` },
     { key: "gallery", label: `Gallery (${gallery.length})` },
+    { key: "quarantine", label: `Quarantine${pendingCount ? ` (${pendingCount})` : ""}` },
+    { key: "traits", label: `Traits (${traits.length})` },
   ];
 
   return (
@@ -98,6 +110,8 @@ export default function App() {
       {tab === "characters" && <CharactersTab characters={characters} onChanged={reload} />}
       {tab === "styles" && <StylesTab styles={styles} onChanged={reload} />}
       {tab === "gallery" && <GalleryTab gallery={gallery} onFeedback={reload} />}
+      {tab === "quarantine" && <QuarantineTab quarantine={quarantine} onResolved={reload} />}
+      {tab === "traits" && <TraitsTab traits={traits} onChanged={reload} />}
 
       <footer className="mt-12 border-t border-neutral-800 pt-4 text-xs text-neutral-600">
         Banana Hacks 2026 · all local, no paid APIs
@@ -454,8 +468,16 @@ function StylesTab({ styles, onChanged }: { styles: StyleProfile[]; onChanged: (
 // ─── Gallery Tab ──────────────────────────────────────────────────────────
 
 function GalleryTab({ gallery, onFeedback }: { gallery: GenerationRecord[]; onFeedback: () => void }) {
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+
   async function handleFeedback(id: string, feedback: "up" | "down") {
-    await submitFeedback(id, feedback);
+    setMessage(null);
+    const res = await submitFeedback(id, feedback, noteText.trim() || undefined);
+    setMessage(res.message);
+    setNoteFor(null);
+    setNoteText("");
     onFeedback();
   }
 
@@ -464,36 +486,227 @@ function GalleryTab({ gallery, onFeedback }: { gallery: GenerationRecord[]; onFe
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {gallery.map((g) => (
-        <div key={g.id} className="rounded-lg border border-neutral-800 bg-neutral-900/50 overflow-hidden">
-          <img src={g.imageUrl} alt={g.prompt} className="w-full" />
-          <div className="p-3">
-            <p className="text-sm text-neutral-300 line-clamp-2">{g.prompt}</p>
-            <p className="mt-1 text-xs text-neutral-600">seed: {g.seed} · {g.width}×{g.height}</p>
-            {g.finalPrompt !== g.prompt && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs text-neutral-500">Final prompt</summary>
-                <p className="mt-1 text-xs text-neutral-400">{g.finalPrompt}</p>
-              </details>
-            )}
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={() => handleFeedback(g.id, "up")}
-                className={`rounded px-3 py-1 text-xs ${g.feedback === "up" ? "bg-green-900/50 text-green-300" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
-              >
-                👍
-              </button>
-              <button
-                onClick={() => handleFeedback(g.id, "down")}
-                className={`rounded px-3 py-1 text-xs ${g.feedback === "down" ? "bg-red-900/50 text-red-300" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
-              >
-                👎
-              </button>
+    <div>
+      {message && (
+        <p className="mb-4 rounded border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm text-neutral-300">
+          {message}
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {gallery.map((g) => (
+          <div key={g.id} className="rounded-lg border border-neutral-800 bg-neutral-900/50 overflow-hidden">
+            <img src={g.imageUrl} alt={g.prompt} className="w-full" />
+            <div className="p-3">
+              <p className="text-sm text-neutral-300 line-clamp-2">{g.prompt}</p>
+              <p className="mt-1 text-xs text-neutral-600">seed: {g.seed} · {g.width}×{g.height} · {g.steps} steps</p>
+              {g.feedbackNote && (
+                <p className="mt-1 text-xs text-neutral-500">note: {g.feedbackNote}</p>
+              )}
+              {g.finalPrompt !== g.prompt && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-neutral-500">Final prompt</summary>
+                  <p className="mt-1 text-xs text-neutral-400">{g.finalPrompt}</p>
+                </details>
+              )}
+
+              {noteFor === g.id ? (
+                <div className="mt-3 space-y-2">
+                  <input
+                    value={noteText}
+                    onChange={(e) => setNoteText(e.target.value)}
+                    placeholder="What was wrong / what did you like?"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white placeholder:text-neutral-600 focus:outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleFeedback(g.id, "down")}
+                      className="rounded bg-red-900/40 px-3 py-1 text-xs text-red-300 hover:bg-red-900/60"
+                    >
+                      Submit 👎
+                    </button>
+                    <button
+                      onClick={() => handleFeedback(g.id, "up")}
+                      className="rounded bg-green-900/40 px-3 py-1 text-xs text-green-300 hover:bg-green-900/60"
+                    >
+                      Submit 👍
+                    </button>
+                    <button
+                      onClick={() => { setNoteFor(null); setNoteText(""); }}
+                      className="rounded px-2 py-1 text-xs text-neutral-500 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleFeedback(g.id, "up")}
+                    className={`rounded px-3 py-1 text-xs ${g.feedback === "up" ? "bg-green-900/50 text-green-300" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={() => handleFeedback(g.id, "down")}
+                    className={`rounded px-3 py-1 text-xs ${g.feedback === "down" ? "bg-red-900/50 text-red-300" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
+                  >
+                    👎
+                  </button>
+                  <button
+                    onClick={() => { setNoteFor(g.id); setNoteText(g.feedbackNote ?? ""); }}
+                    className="rounded px-2 py-1 text-xs text-neutral-500 hover:text-white"
+                  >
+                    + note
+                  </button>
+                </div>
+              )}
             </div>
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Quarantine Tab (M3) ──────────────────────────────────────────────────
+
+function QuarantineTab({ quarantine, onResolved }: { quarantine: QuarantineItem[]; onResolved: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function resolve(id: string, action: "approve" | "reject") {
+    setBusy(id);
+    try {
+      if (action === "approve") await approveQuarantine(id);
+      else await rejectQuarantine(id);
+      onResolved();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const pending = quarantine.filter((q) => q.status === "pending");
+  const resolved = quarantine.filter((q) => q.status !== "pending");
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-neutral-300">
+          Needs Review {pending.length > 0 && <span className="text-amber-400">({pending.length})</span>}
+        </h3>
+        {pending.length === 0 && (
+          <p className="text-sm text-neutral-600">
+            Nothing held back. Feedback that contradicts a stored profile or looks unreliable
+            lands here instead of going straight into memory.
+          </p>
+        )}
+        <div className="space-y-3">
+          {pending.map((q) => (
+            <div key={q.id} className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className={`rounded px-2 py-0.5 text-[10px] uppercase ${q.kind === "avoid" ? "bg-red-900/40 text-red-300" : "bg-green-900/40 text-green-300"}`}>
+                    {q.kind}
+                  </span>
+                  <p className="mt-2 text-sm text-white">"{q.text}"</p>
+                  <p className="mt-1 text-xs text-neutral-500">{q.reason}</p>
+                  <p className="mt-1 text-xs text-neutral-600">from prompt: {q.generationPrompt}</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => resolve(q.id, "approve")}
+                    disabled={busy === q.id}
+                    className="rounded bg-green-900/40 px-3 py-1 text-xs text-green-300 hover:bg-green-900/60 disabled:opacity-40"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => resolve(q.id, "reject")}
+                    disabled={busy === q.id}
+                    className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-400 hover:text-white disabled:opacity-40"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      </section>
+
+      {resolved.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-neutral-400">History</h3>
+          <div className="space-y-2">
+            {resolved.map((q) => (
+              <div key={q.id} className="flex items-center gap-3 rounded border border-neutral-800 bg-neutral-900/40 px-4 py-2 text-sm">
+                <span className={`rounded px-2 py-0.5 text-[10px] uppercase ${q.status === "approved" ? "bg-green-900/40 text-green-300" : "bg-neutral-800 text-neutral-500"}`}>
+                  {q.status}
+                </span>
+                <span className="text-neutral-400">"{q.text}"</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── Traits Tab (M3) ──────────────────────────────────────────────────────
+
+function TraitsTab({ traits, onChanged }: { traits: LearnedTrait[]; onChanged: () => void }) {
+  const avoids = traits.filter((t) => t.kind === "avoid");
+  const prefers = traits.filter((t) => t.kind === "prefer");
+
+  async function remove(id: string) {
+    await deleteTrait(id);
+    onChanged();
+  }
+
+  if (traits.length === 0) {
+    return (
+      <p className="text-sm text-neutral-600">
+        No learned traits yet. Thumbs-down an image with a note like "too dark" and it will
+        be remembered as something to avoid on future generations.
+      </p>
+    );
+  }
+
+  const Row = ({ t, tone }: { t: LearnedTrait; tone: "avoid" | "prefer" }) => (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm ${
+        tone === "avoid"
+          ? "border-red-900/40 bg-red-950/20 text-neutral-300"
+          : "border-green-900/40 bg-green-950/20 text-neutral-300"
+      }`}
+    >
+      <span>{t.text}</span>
+      <button
+        onClick={() => remove(t.memosNodeId)}
+        className="shrink-0 rounded px-2 py-0.5 text-xs text-neutral-500 hover:text-red-300"
+        title="Remove this trait from memory"
+      >
+        ✕
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      <section>
+        <h3 className="mb-3 text-sm font-semibold text-red-300">Avoid ({avoids.length})</h3>
+        <div className="space-y-2">
+          {avoids.length === 0 && <p className="text-sm text-neutral-600">None yet.</p>}
+          {avoids.map((t) => <Row key={t.id} t={t} tone="avoid" />)}
+        </div>
+      </section>
+      <section>
+        <h3 className="mb-3 text-sm font-semibold text-green-300">Prefer ({prefers.length})</h3>
+        <div className="space-y-2">
+          {prefers.length === 0 && <p className="text-sm text-neutral-600">None yet.</p>}
+          {prefers.map((t) => <Row key={t.id} t={t} tone="prefer" />)}
+        </div>
+      </section>
     </div>
   );
 }
