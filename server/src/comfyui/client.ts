@@ -22,11 +22,20 @@ export interface ProgressEvent {
 }
 
 /** Queue a workflow and return the prompt_id. */
-export async function queuePrompt(workflow: Record<string, unknown>): Promise<QueueResult> {
+export async function queuePrompt(
+  workflow: Record<string, unknown>,
+  clientId?: string,
+): Promise<QueueResult> {
+  // `client_id` is what binds this job to a WebSocket subscriber. Without it
+  // ComfyUI accepts the job but sends no progress events to our /ws
+  // connection — verified by probing the raw WS with and without the field.
+  const body: Record<string, unknown> = { prompt: workflow };
+  if (clientId) body.client_id = clientId;
+
   const res = await fetch(`${COMFYUI_URL}/prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: workflow }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.text();
@@ -63,14 +72,32 @@ export async function fetchImage(filename: string, subfolder = "", type = "outpu
 
 /**
  * Stream progress over WebSocket.
- * Calls onProgress with {value, max} for each step, onDone when finished.
+ *
+ * `clientId` is ComfyUI's way of addressing a subscriber; on a local install
+ * any unique string works, and the queued job must carry the same value as
+ * `client_id` or no events are routed here.
+ *
+ * Events actually observed on ComfyUI 0.39.0 (verified by probe):
+ *   status, execution_start, execution_cached, executing, executed,
+ *   execution_success, progress_state, progress
+ *
+ * NOTE: `progress` is NOT reliably emitted — a run that completed
+ * successfully delivered every other type but zero `progress` frames. It
+ * appears when the sampler reports intermediate steps, which is not
+ * guaranteed. `progress_state` IS always delivered and carries the same
+ * {value, max} payload per node, so we derive progress from that instead and
+ * treat `progress` as a bonus.
+ *
+ * Callbacks:
+ *   onProgress(value, max) — sampler step for the KSampler node
+ *   onStage(text)          — human-readable stage transitions
+ *   onDone()               — execution finished
  */
 export function streamProgress(
   clientId: string,
-  promptId: string,
   callbacks: {
     onProgress?: (value: number, max: number) => void;
-    onStatus?: (msg: string) => void;
+    onStage?: (msg: string) => void;
     onDone?: () => void;
     onError?: (err: string) => void;
   },
@@ -78,22 +105,56 @@ export function streamProgress(
   const wsUrl = COMFYUI_URL.replace(/^http/, "ws");
   const ws = new WebSocket(`${wsUrl}/ws?clientId=${clientId}`);
 
+  let finished = false;
+
   ws.on("message", (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === "progress") {
-        callbacks.onProgress?.(msg.data.value, msg.data.max);
-      } else if (msg.type === "executing") {
-        if (msg.data.node === null) {
-          callbacks.onDone?.();
-          ws.close();
+      const data = msg.data ?? {};
+
+      switch (msg.type) {
+        case "progress": {
+          // value/max are the sampler's own counters.
+          if (typeof data.value === "number" && typeof data.max === "number") {
+            callbacks.onProgress?.(data.value, data.max);
+          }
+          break;
         }
-      } else if (msg.type === "executed") {
-        if (msg.data.prompt_id === promptId) {
-          callbacks.onStatus?.(`executed node ${msg.data.node}`);
+        case "progress_state": {
+          // { nodes: { "<id>": { value, max, state } } }
+          const nodes = data.nodes as Record<string, { value?: number; max?: number }> | undefined;
+          if (nodes) {
+            // The KSampler is the node with max > 1; loader/encode nodes
+            // report max 1 and would otherwise show as a spurious "1/1 step".
+            for (const n of Object.values(nodes)) {
+              if (typeof n.max === "number" && n.max > 1 &&
+                  typeof n.value === "number") {
+                callbacks.onProgress?.(n.value, n.max);
+              }
+            }
+          }
+          break;
         }
-      } else if (msg.type === "status") {
-        callbacks.onStatus?.(JSON.stringify(msg.data));
+        case "execution_start":
+          callbacks.onStage?.("execution started");
+          break;
+        case "executing":
+          callbacks.onStage?.(data.node === null ? "finished" : `node ${String(data.node)}`);
+          // `node: null` is ComfyUI's end-of-execution signal.
+          if (data.node === null && !finished) {
+            finished = true;
+            callbacks.onDone?.();
+            ws.close();
+          }
+          break;
+        case "execution_success":
+          callbacks.onStage?.("complete");
+          break;
+        case "executed":
+          callbacks.onStage?.("node done");
+          break;
+        case "status":
+          break;
       }
     } catch {
       // ignore malformed messages

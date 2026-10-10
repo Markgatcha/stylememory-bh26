@@ -117,14 +117,38 @@ export interface GenerateResult {
   height: number;
 }
 
-export async function generate(data: {
+/** What POST /api/generate returns: a handle, not the image. */
+export interface GenerateTicket {
+  jobId: string;
+  streamUrl: string;
+}
+
+export type JobStage =
+  | "queued"
+  | "loading-model"
+  | "sampling"
+  | "decoding"
+  | "saving"
+  | "done"
+  | "error";
+
+export interface JobUpdate {
+  stage: JobStage;
+  value?: number;
+  max?: number;
+  pct?: number;
+  message?: string;
+}
+
+/** Queue a generation. Resolves immediately with a job handle. */
+export async function startGenerate(data: {
   prompt: string;
   memoryOff?: boolean;
   seed?: number;
   steps?: number;
   width?: number;
   height?: number;
-}): Promise<GenerateResult> {
+}): Promise<GenerateTicket> {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -134,7 +158,71 @@ export async function generate(data: {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((err as { error: string }).error ?? "generation failed");
   }
-  return res.json() as Promise<GenerateResult>;
+  return res.json() as Promise<GenerateTicket>;
+}
+
+/**
+ * Subscribe to a job's progress over SSE.
+ *
+ * `onUpdate` fires for every stage transition and every sampler step.
+ * `onResult` fires once with the finished generation; `onError` on failure.
+ * Returns an unsubscribe function.
+ */
+export function subscribeJob(
+  ticket: GenerateTicket,
+  handlers: {
+    onUpdate?: (u: JobUpdate) => void;
+    onResult?: (r: GenerateResult) => void;
+    onError?: (msg: string) => void;
+  },
+): () => void {
+  const es = new EventSource(ticket.streamUrl);
+  let closed = false;
+
+  const stages: JobStage[] = ["queued", "loading-model", "sampling", "decoding", "saving", "done", "error"];
+  for (const stage of stages) {
+    es.addEventListener(stage, (ev) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        if (stage === "done") {
+          handlers.onUpdate?.({ stage: "done", pct: 100 });
+        } else {
+          handlers.onUpdate?.(data as JobUpdate);
+        }
+      } catch {
+        // malformed frame — ignore
+      }
+    });
+  }
+
+  // The terminal events are emitted with their own names too; listen for both
+  // spellings so a reconnect that misses the stage frame still resolves.
+  es.addEventListener("result", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onResult?.(JSON.parse((ev as MessageEvent).data) as GenerateResult);
+    } catch { /* ignore */ }
+  });
+
+  es.addEventListener("failed", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onError?.((JSON.parse((ev as MessageEvent).data) as { error?: string }).error ?? "generation failed");
+    } catch { /* ignore */ }
+  });
+
+  es.onerror = () => {
+    // EventSource auto-reconnects; only surface an error if it gave up.
+    if (es.readyState === EventSource.CLOSED) {
+      handlers.onError?.("progress stream closed");
+    }
+  };
+
+  return () => {
+    closed = true;
+    es.close();
+  };
 }
 
 // ─── Gallery ──────────────────────────────────────────────────────────────

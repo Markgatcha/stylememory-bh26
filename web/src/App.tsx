@@ -1,14 +1,14 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchHealth, fetchCharacters, fetchStyles, fetchGallery,
   createCharacter, updateCharacter, createStyle, updateStyle, deleteCharacter, deleteStyle,
-  generate, submitFeedback,
+  startGenerate, subscribeJob, submitFeedback,
   fetchQuarantine, approveQuarantine, rejectQuarantine, fetchTraits, deleteTrait,
   fetchInspect, fetchHistory, runCompare,
   type HealthResponse, type Character, type StyleProfile,
   type GenerationRecord, type GenerateResult,
   type QuarantineItem, type LearnedTrait,
-  type InspectedMemory, type AbResult,
+  type InspectedMemory, type AbResult, type JobUpdate,
 } from "./api";
 
 type Tab = "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
@@ -131,6 +131,43 @@ export default function App() {
 
 // ─── Generate Tab ─────────────────────────────────────────────────────────
 
+const STAGE_LABEL: Record<string, string> = {
+  queued: "Queued",
+  "loading-model": "Loading model",
+  sampling: "Sampling",
+  decoding: "Decoding",
+  saving: "Saving",
+  done: "Done",
+  error: "Error",
+};
+
+function ProgressBar({ update }: { update: JobUpdate | null }) {
+  const pct = update?.pct ?? (update?.stage === "done" ? 100 : 0);
+  const label = update ? STAGE_LABEL[update.stage] ?? update.stage : "Starting";
+  const detail =
+    update?.stage === "sampling" && update.value !== undefined && update.max
+      ? `step ${update.value} / ${update.max}`
+      : (update?.message ?? "");
+
+  return (
+    <div className="mt-3">
+      <div className="mb-1 flex items-baseline justify-between text-xs">
+        <span className="text-neutral-300">{label}</span>
+        <span className="text-neutral-500">
+          {detail && <span className="mr-2">{detail}</span>}
+          {pct}%
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+        <div
+          className="h-full rounded-full bg-white transition-[width] duration-300"
+          style={{ width: `${Math.max(2, pct)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function GenerateTab({
   characters,
   styles,
@@ -145,24 +182,40 @@ function GenerateTab({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState<JobUpdate | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  // Never leave an EventSource open across unmounts.
+  useEffect(() => () => stopRef.current?.(), []);
 
   async function handleGenerate() {
     if (!prompt.trim() || loading) return;
     setLoading(true);
     setError(null);
     setResult(null);
-    setElapsed(0);
-    const timer = setInterval(() => setElapsed((e) => e + 1), 1000);
+    setProgress({ stage: "queued", message: "queued" });
     try {
-      const r = await generate({ prompt, memoryOff });
-      setResult(r);
-      onGenerated();
+      const ticket = await startGenerate({ prompt, memoryOff });
+      stopRef.current = subscribeJob(ticket, {
+        onUpdate: (u) => setProgress(u),
+        onResult: (r) => {
+          setResult(r);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+          onGenerated();
+        },
+        onError: (msg) => {
+          setError(msg);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+        },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      clearInterval(timer);
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -192,10 +245,11 @@ function GenerateTab({
             disabled={loading || !prompt.trim()}
             className="rounded bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-neutral-200 disabled:opacity-40"
           >
-            {loading ? `Generating... ${elapsed}s` : "Generate"}
+            {loading ? "Generating…" : "Generate"}
           </button>
         </div>
         {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+        {loading && <ProgressBar update={progress} />}
       </section>
 
       {result && (

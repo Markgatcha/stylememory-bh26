@@ -7,19 +7,19 @@ import { randomUUID } from "node:crypto";
 import { COMFYUI_URL, ensureDirs, WORKFLOW_FILE, IMAGES_DIR } from "./paths.js";
 import { closeMemOS, getMemOS, NAMESPACE } from "./memory/memos.js";
 import type { HealthResponse } from "./types.js";
-import { queuePrompt, waitForCompletion, fetchImage } from "./comfyui/client.js";
-import { loadWorkflow } from "./comfyui/introspect.js";
-import { appendGeneration, loadGenerations, updateGeneration } from "./generations.js";
+import { loadGenerations, updateGeneration } from "./generations.js";
 import {
   storeCharacter, updateCharacter, storeStyle, updateStyle,
   recallMemories, listCharacters, listStyles, listTraits, deleteTrait, deleteRecord,
   type RecalledMemory,
 } from "./memory/records.js";
-import { buildEnrichedPrompt } from "./prompt/builder.js";
 import { nextSeed } from "./seed-state.js";
 import { processFeedback, listQuarantine, approveQuarantine, rejectQuarantine } from "./memory/feedback.js";
 import { inspectAll, inspectHistory, inspectGraph } from "./memory/inspect.js";
 import { runComparison } from "./compare.js";
+import { startGeneration, type GenerateRequest, type GenerateResult } from "./generate-async.js";
+import { getJob, subscribeJob } from "./jobs.js";
+import { streamSSE } from "hono/streaming";
 
 ensureDirs();
 
@@ -71,131 +71,75 @@ app.get("/api/health", async (c) => {
 
 app.get("/", (c) => c.text("StyleMemory API — Banana Hacks 2026 — M2"));
 
-// ─── Generate ─────────────────────────────────────────────────────────────
-
-interface GenerateRequest {
-  prompt: string;
-  memoryOff?: boolean;
-  seed?: number;
-  steps?: number;
-  width?: number;
-  height?: number;
-}
+// ─── Generate (async + SSE progress) ──────────────────────────────────────
 
 app.post("/api/generate", async (c) => {
   const body = await c.req.json<GenerateRequest>();
-  if (!body.prompt?.trim()) {
-    return c.json({ error: "prompt is required" }, 400);
-  }
+  if (!body.prompt?.trim()) return c.json({ error: "prompt is required" }, 400);
 
-  let workflow;
-  try {
-    workflow = loadWorkflow(WORKFLOW_FILE);
-  } catch (err) {
-    return c.json({ error: `workflow load failed: ${err}` }, 500);
-  }
+  // Non-blocking: return the jobId, then stream progress over SSE.
+  const jobId = startGeneration(body);
+  return c.json({ jobId, streamUrl: `/api/progress/${jobId}` }, 202);
+});
 
-  // Recall memories (unless memoryOff)
-  let enriched = { positive: body.prompt, negative: "", memoriesUsed: [] as RecalledMemory[] };
-  if (!body.memoryOff) {
-    const memories = await recallMemories(body.prompt);
-    enriched = buildEnrichedPrompt(body.prompt, memories);
-  }
+app.get("/api/progress/:jobId", (c) => {
+  const jobId = c.req.param("jobId");
+  const job = getJob<GenerateResult>(jobId);
+  if (!job) return c.json({ error: "job not found" }, 404);
 
-  // Clone and patch the workflow
-  const patched = structuredClone(workflow.raw);
-
-  const posNode = patched[workflow.nodes.positive]!;
-  posNode.inputs.prompt = enriched.positive;
-  if (enriched.negative && "negative_prompt" in posNode.inputs) {
-    posNode.inputs.negative_prompt = enriched.negative;
-  }
-
-  const sampler = patched[workflow.nodes.sampler]!;
-  // Seed policy:
-  //   - explicitly pinned seed (before/after comparison) → use it verbatim,
-  //     do NOT advance the rotation counter
-  //   - otherwise → claim the next rotated seed (lastSeed + 1). Reusing one
-  //     seed across many generations visibly degrades Qwen Image output, so
-  //     every unpinned generation gets a fresh one.
-  if (body.seed !== undefined) {
-    sampler.inputs.seed = body.seed;
-  } else {
-    sampler.inputs.seed = nextSeed();
-  }
-  // Steps: the Turbo checkpoint ships a distilled 8-step sigma schedule.
-  // Do NOT raise this — 25 steps over-iterates the coarse phase and starves
-  // fine detail (observed: sharp ground, under-denoised fur). 8 is the value
-  // the model was trained and evaluated at.
-  if (body.steps !== undefined) sampler.inputs.steps = body.steps;
-
-  const latent = patched[workflow.nodes.latent]!;
-  if (body.width !== undefined) latent.inputs.width = body.width;
-  if (body.height !== undefined) latent.inputs.height = body.height;
-
-  // Queue and wait
-  let queueResult;
-  try {
-    queueResult = await queuePrompt(patched);
-  } catch (err) {
-    return c.json({ error: `comfyui queue failed: ${err}` }, 502);
-  }
-
-  let outputs: Record<string, unknown>;
-  try {
-    outputs = await waitForCompletion(queueResult.prompt_id);
-  } catch (err) {
-    return c.json({ error: `comfyui generation failed: ${err}` }, 502);
-  }
-
-  // Find image output
-  let imageFile = "";
-  for (const [, out] of Object.entries(outputs)) {
-    const o = out as { images?: Array<{ filename: string; subfolder: string; type: string }> };
-    if (o.images?.length) {
-      imageFile = o.images[0]!.filename;
-      break;
+  return streamSSE(c, async (stream) => {
+    // Replay everything emitted before this subscriber connected, so a late
+    // or reconnecting client still sees the full history.
+    for (const update of job.updates) {
+      await stream.writeSSE({ data: JSON.stringify(update), event: update.stage });
     }
-  }
-  if (!imageFile) {
-    return c.json({ error: "no image in comfyui output" }, 502);
-  }
 
-  // Download and save to gallery
-  const imgBuffer = await fetchImage(imageFile);
-  const localName = `${randomUUID()}.png`;
-  writeFileSync(join(IMAGES_DIR, localName), imgBuffer);
+    if (job.status !== "running") {
+      await stream.writeSSE({
+        data: JSON.stringify(job.status === "done" ? job.result : { error: job.error }),
+        event: job.status === "done" ? "result" : "failed",
+      });
+      await stream.close();
+      return;
+    }
 
-  // Record
-  const record = {
-    id: randomUUID(),
-    createdAt: Date.now(),
-    prompt: body.prompt,
-    finalPrompt: enriched.positive,
-    memoriesUsed: enriched.memoriesUsed.map((m) => m.id),
-    seed: (sampler.inputs.seed as number) ?? 0,
-    imageFile: localName,
-    width: (latent.inputs.width as number) ?? 1024,
-    height: (latent.inputs.height as number) ?? 1024,
-    steps: (sampler.inputs.steps as number) ?? 8,
-    cfg: (sampler.inputs.cfg as number) ?? 1,
-    comfyuiPromptId: queueResult.prompt_id,
-    feedback: null as "up" | "down" | null,
-    feedbackNote: null as string | null,
-  };
-  appendGeneration(record);
+    // Live updates are pushed by the job registry via this listener.
+    const unsubscribe = subscribeJob(jobId, (update) => {
+      void stream.writeSSE({ data: JSON.stringify(update), event: update.stage });
+    });
 
-  return c.json({
-    id: record.id,
-    prompt: record.prompt,
-    imageFile: localName,
-    imageUrl: `/images/${localName}`,
-    finalPrompt: enriched.positive,
-    negativePrompt: enriched.negative,
-    memoriesUsed: enriched.memoriesUsed,
-    seed: record.seed,
-    width: record.width,
-    height: record.height,
+    // Wait for terminal state. A keepalive comment is written every 15s so
+    // proxies and the browser do not consider the connection idle and drop
+    // it — without this the stream silently ends mid-generation.
+    let aborted = false;
+    stream.onAbort(() => {
+      aborted = true;
+    });
+
+    await new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        const j = getJob<GenerateResult>(jobId);
+        if (aborted || !j || j.status !== "running") {
+          clearInterval(check);
+          clearInterval(keepalive);
+          resolve();
+        }
+      }, 500);
+
+      const keepalive = setInterval(() => {
+        void stream.writeSSE({ data: "{}", event: "ping" });
+      }, 15000);
+    });
+
+    unsubscribe();
+
+    const final = getJob<GenerateResult>(jobId);
+    if (final?.status === "done") {
+      await stream.writeSSE({ data: JSON.stringify(final.result), event: "result" });
+    } else if (final?.status === "error") {
+      await stream.writeSSE({ data: JSON.stringify({ error: final.error }), event: "failed" });
+    }
+    await stream.close();
   });
 });
 
