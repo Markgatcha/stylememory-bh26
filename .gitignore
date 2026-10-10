@@ -17,6 +17,7 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/generations.json
+data/seed-state.json
 data/images/*
 !data/images/.gitkeep
 

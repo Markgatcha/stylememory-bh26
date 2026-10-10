@@ -16,6 +16,7 @@ import {
   type RecalledMemory,
 } from "./memory/records.js";
 import { buildEnrichedPrompt } from "./prompt/builder.js";
+import { nextSeed } from "./seed-state.js";
 
 ensureDirs();
 
@@ -108,7 +109,17 @@ app.post("/api/generate", async (c) => {
   }
 
   const sampler = patched[workflow.nodes.sampler]!;
-  if (body.seed !== undefined) sampler.inputs.seed = body.seed;
+  // Seed policy:
+  //   - explicitly pinned seed (before/after comparison) → use it verbatim,
+  //     do NOT advance the rotation counter
+  //   - otherwise → claim the next rotated seed (lastSeed + 1). Reusing one
+  //     seed across many generations visibly degrades Qwen Image output, so
+  //     every unpinned generation gets a fresh one.
+  if (body.seed !== undefined) {
+    sampler.inputs.seed = body.seed;
+  } else {
+    sampler.inputs.seed = nextSeed();
+  }
   if (body.steps !== undefined) sampler.inputs.steps = body.steps;
 
   const latent = patched[workflow.nodes.latent]!;
