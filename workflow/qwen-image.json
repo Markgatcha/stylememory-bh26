@@ -1,0 +1,97 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "qwen-image-2.1-turbo-Q5_0.gguf"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "5": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "prompt": "Masterpiece, best quality, ultra-detailed, highly detailed 3D render, realistic skin texture, soft volumetric lighting, cinematic lighting, depth of field,\n\nA beautiful young woman with light tan skin and freckles across her nose and cheeks, reclining nude on a wooden beach lounge chair with blue-and-white striped fabric. She has long pink-to-magenta hair styled in two thick braids that fall over her shoulders, a pink headband with small black cat-ear-like horns, blue stud earrings, a gold septum ring, and full red lips. Her arms are raised and bent behind her head in a relaxed pose. She has a confident, slightly sultry expression looking toward the viewer.\n\nHer entire body is covered in intricate cybernetic / steampunk tattoos in shades of purple, lavender, soft blue, gold, and metallic silver. The tattoos form complex mechanical patterns: interlocking gears, circuit lines, mechanical joints, skeletal understructures, lightning bolt motifs, circular mechanical wheels on her thighs, and detailed machinery covering her breasts, torso, arms, hips, and legs. The tattoos look semi-transparent in places, revealing the underlying skin while still clearly mechanical. Soft glossy highlights on the skin and tattoos.\n\nFull frontal nude view, natural proportions, detailed anatomy, visible breasts with detailed nipples, detailed navel, detailed genitals. Soft realistic lighting from the bright beach sky casting gentle shadows.\n\nBackground: sunny tropical beach with light beige sand, calm blue ocean with small waves in the distance, bright partly cloudy sky. To the left of the chair is a small wooden side table holding a coconut drink with a red paper umbrella and striped straw, a few small bottles, and a smartphone. Soft bokeh and atmospheric depth.\n\nStyle: high-end 3D character art, slightly stylized realism mixed with anime-inspired features, clean sharp details, vibrant but natural colors, professional digital illustration quality, artist signature style similar to high-quality NSFW 3D renders.",
+      "negative_prompt": "low quality, blurry, deformed, extra limbs, bad anatomy, poorly drawn face, poorly drawn hands, missing fingers, extra fingers, fused fingers, mutated hands, deformed face, watermark, text, logo, signature, oversaturated, cartoonish, flat colors, plastic skin, ugly, distorted proportions",
+      "vae": [
+        "3",
+        0
+      ],
+      "resolution": 1024,
+      "images": []
+    }
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "5",
+        1
+      ],
+      "latent_image": [
+        "4",
+        0
+      ],
+      "seed": 593103825222985,
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "7": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "6",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "8": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "StyleMemory",
+      "images": [
+        "7",
+        0
+      ]
+    }
+  }
+}
