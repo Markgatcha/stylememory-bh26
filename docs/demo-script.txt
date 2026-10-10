@@ -1,0 +1,224 @@
+STYLEMEMORY — 3-MINUTE DEMO SCRIPT
+Banana Hacks 2026 · target 2:45, hard cap 3:00
+=====================================================
+
+BEFORE YOU START (do this the night before)
+--------------------------------------------
+[ ] ComfyUI running on 8188, queue EMPTY
+[ ] pnpm dev running — API :3001, web :5173
+[ ] Browser already open at http://127.0.0.1:5173
+[ ] ComfyUI launch flags verified — "fp8" must NOT appear in the process args
+[ ] Character "Kai" exists with: blue hair, red jacket, worn jeans
+[ ] At least one image already in the Gallery (so the feedback step has something)
+[ ] Zoom the browser to 125% so text is readable on a projector
+[ ] Close every other window. No notifications.
+[ ] Rehearse this end-to-end TWICE with a timer. Aim for 2:45.
+
+RULE: if a generation is running when your time slot starts, DO NOT wait for
+it. Skip to the A/B Compare tab — that feature is the whole argument anyway.
+
+
+=====================================================
+0:00 - 0:25  THE HOOK  (25s)
+=====================================================
+Say:
+  "Comic artists and indie game devs have a problem: they need the same
+   character to look the same across dozens of images. Text-to-image is
+   stateless — same prompt, different face, every single time.
+
+   The industry's answer is to train a LoRA per character: 15+ images, a GPU
+   training run, a model file for every character. It works. It's expensive.
+
+   I asked a narrower question: how much consistency can you get from MEMORY
+   alone? No training. No reference images. No model files."
+
+Show: the app, already open. Don't click yet.
+
+DO NOT say: "it's a wrapper around ComfyUI." It isn't, and you have 2 minutes
+to prove that.
+
+
+=====================================================
+0:25 - 1:15  THE PROOF: A/B COMPARE  (50s)  <-- YOUR STRONGEST MOMENT
+=====================================================
+Do:
+  1. Click "A / B Compare"
+  2. Type: Kai skateboarding at sunset
+  3. Click "Run comparison"
+
+Say while it generates:
+  "This runs the same prompt twice with ONE shared seed and the same size.
+   The only difference between these two images is whether memory is on."
+
+When both images appear, point at the LEFT then the RIGHT:
+  "Memory OFF — generic figure, dark hair, dark shirt. It has no idea who Kai is.
+   Memory ON — blue hair, red jacket, ripped jeans, crouched stance. That's the
+   character I stored in memory.
+
+   Same seed. Same prompt. Same size. The only variable was memory."
+
+Then say the numbers:
+  "I didn't just eyeball it. I ran this 20 times. Memory recall: 20 out of 20.
+   Mean pixel divergence: 15 percent, standard deviation 2.3 points.
+   The effect shows up in every single run."
+
+FALLBACK if it errors or is too slow:
+  - Use the two images already saved from the earlier suite run.
+  - Say: "I've got a pair from an earlier run" and show those.
+  - Still say the numbers. The numbers are the argument, not the live generation.
+
+
+=====================================================
+1:15 - 1:55  IT'S NOT A WRAPPER: MEMORY TAB  (40s)
+=====================================================
+Do:
+  1. Click "Memory" tab
+  2. Expand the Kai entry
+  3. Scroll to "version history"
+
+Say:
+  "This is every memory the studio holds — content, tags, importance, trust
+   score, how many times it's been recalled.
+
+   And here's version history. When you edit a character, it doesn't
+   delete-and-recreate. It supersedes — the old version is marked historical
+   and stays queryable. v1, v2, current."
+
+Point at the pipeline:
+  "The whole thing is a pipeline: recall memories, build an enriched prompt,
+   send it to Qwen Image through ComfyUI, get feedback, write it back.
+   The workflow file is introspected at runtime — I never hardcode node IDs."
+
+Say if asked about difficulty:
+  "Two things that bit me: Qwen runs at CFG 1, where ComfyUI ignores negative
+   prompts entirely, so learned 'avoid' rules have to be rewritten as positive
+   phrasing. And the Turbo checkpoint ships an 8-step schedule — running 25
+   steps starves fine detail. Both were found by measuring, not guessing."
+
+
+=====================================================
+1:55 - 2:30  THE TWIST: QUARANTINE  (35s)
+=====================================================
+Do:
+  1. Click "Gallery"
+  2. Pick any image, click "+ note"
+  3. Type: too dark and muddy
+  4. Submit (thumbs down)
+
+Say:
+  "Feedback teaches. That note just became a learned 'avoid' trait."
+
+Then:
+  5. On another image, "+ note", type: hair color is wrong
+  6. Submit
+
+Say, and land this:
+  "But that one did NOT go into memory. It went to quarantine.
+
+   Because 'hair color is wrong' is a complaint about one character, not a
+   general preference. If I'd stored it automatically, every future prompt
+   would carry the phrase 'free of hair color is wrong.' Meaningless.
+
+   Most feedback systems write straight to memory. Refusing to trust
+   identity-level feedback is what keeps this one clean."
+
+FALLBACK: if the Quarantine tab has items pending already, just show those
+instead of creating new ones. Say "here's one that was held back."
+
+
+=====================================================
+2:30 - 2:50  IMPACT + CLOSE  (20s)
+=====================================================
+Say:
+  "Who cares? A comic artist with a recurring cast. An indie dev who needs one
+   protagonist across a whole game. It's local, it's free, there are no paid
+   APIs, and memory survives restarts.
+
+   Next: semantic recall so memory surfaces things you never named, and
+   image-reference memory so a character can carry an actual face.
+
+   It's Banana Hacks 2026. StyleMemory. Thank you."
+
+STOP TALKING. Let them ask.
+
+
+=====================================================
+LIKELY QUESTIONS — HAVE ANSWERS READY
+=====================================================
+Q: "How is this different from just writing a longer prompt?"
+A: "Because it's persistent and it's measurable. A longer prompt is something
+    you retype every time and can't verify. This recalls automatically, shows
+    you which memories fired, and I can prove the delta with a same-seed A/B.
+    The 20-run suite is in the repo."
+
+Q: "Isn't this just a prompt template?"
+A: "The pipeline is recall, then construct, then diffuse, then feedback, then
+    re-store. The template is one stage. The recall has a name-match path and
+    a relevance path, edits supersede rather than overwrite, and feedback is
+    gated. That's a system, not a string format."
+
+Q: "What stops memory from getting polluted?"
+A: "Three things. A relevance floor so unrelated prompts don't inherit random
+    memories. Quarantine for anything touching identity. And every memory
+    records its trust score and source, so you can see where it came from."
+
+Q: "Why not use CLIP embeddings for recall?"
+A: "MemOS's full-text search doesn't return prose matches on this version, so
+    recall currently leans on name matching. CLIP would help semantically but
+    I have no CLIP model on disk and it wouldn't answer the harder question —
+    whether the memory-ON image is actually better. Distance isn't quality."
+
+Q: "Does the memory actually improve output, or just change it?"
+A: "Fair question, and I'd push back on the framing. Pixel divergence proves
+    memory steers generation reproducibly — 20 out of 20 runs. Whether the ON
+    image is better is a human judgement; that's why the UI shows you both
+    rather than scoring them for you."
+
+Q: "What's the hardest bug you hit?"
+A: "Memory contamination. A relevance fallback returned a constant score of 1.0
+    for every node, so the most important character got injected into EVERY
+    prompt. I caught it when 'a red fox in a forest' came back wearing a
+    character's jacket, with fur melting into the fabric. Found it by probing
+    the SDK directly instead of guessing."
+
+Q: "How long does a generation take?"
+A: "About 50 seconds at 1024 square on an 8-gig RTX 5050. The progress bar
+    streams real sampler steps."
+
+Q: "Could this scale past one machine?"
+A: "Not today — it's local-first by design, which is the point for artists who
+    can't ship their characters to a cloud API. The memory layer is the part
+    that would need to move first."
+
+
+=====================================================
+TIMING CHECKS
+=====================================================
+  0:25  finished the hook, moving to A/B
+  1:15  A/B images on screen, numbers said out loud
+  1:55  version history shown
+  2:30  quarantine landed
+  2:50  done talking
+
+If you are BEHIND at 1:15: skip the Memory tab version-history detail, jump
+straight to quarantine. Quarantine is the differentiator; version history is
+a supporting detail.
+
+If you are BEHIND at 1:55: skip creating the second feedback item. Just say
+"and identity-level feedback gets held for review instead" and move on.
+
+NEVER skip the A/B Compare. It is the argument. Everything else is support.
+
+
+=====================================================
+DEMO FAILURE PLAYBOOK
+=====================================================
+ComfyUI down        -> "Let me show you a pair I captured earlier." Use saved
+                       images. The 20-run numbers still stand.
+Generation slow     -> Do not wait. Talk over it, or cut to saved images.
+Web UI broken       -> Open the saved images from data/images/ and narrate.
+Judge is impatient  -> Jump to 0:25. A/B first, context after.
+Judge wants code    -> Open server/src/memory/feedback.ts. It's short and the
+                       quarantine logic is self-evident.
+Total blackout      -> The README has the measured table. Walk them through it
+                       and say the numbers. Still scores on Row E.
