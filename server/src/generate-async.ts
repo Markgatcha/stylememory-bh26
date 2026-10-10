@@ -31,6 +31,17 @@ export interface GenerateRequest {
   height?: number;
 }
 
+/**
+ * Upper bound on the enriched prompt we will send.
+ *
+ * The text encoder has a finite context window; a prompt past it fails
+ * somewhere inside ComfyUI with an error that does not name the real cause.
+ * Memory enrichment only ever appends, so a long user prompt plus several
+ * recalled memories is the realistic way to hit this. Fail here instead,
+ * with a message that says what happened.
+ */
+const MAX_PROMPT_CHARS = 4000;
+
 export interface GenerateResult {
   id: string;
   prompt: string;
@@ -78,6 +89,14 @@ async function runGeneration(jobId: string, req: GenerateRequest): Promise<void>
     // Qwen node (`prompt`) and a stock CLIPTextEncode node (`text`) both work
     // without this code knowing which model is in use.
     const posNode = patched[workflow.nodes.positive]!;
+
+    if (enriched.positive.length > MAX_PROMPT_CHARS) {
+      throw new Error(
+        `Enriched prompt is ${enriched.positive.length} characters, over the ${MAX_PROMPT_CHARS} limit. ` +
+          `Shorten the prompt or store fewer/shorter memories.`,
+      );
+    }
+
     posNode.inputs[workflow.nodes.positivePromptInput] = enriched.positive;
     if (enriched.negative && workflow.nodes.negativePromptInput) {
       posNode.inputs[workflow.nodes.negativePromptInput] = enriched.negative;

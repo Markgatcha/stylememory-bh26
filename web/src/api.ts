@@ -467,3 +467,90 @@ export function subscribeConsistency(
     es.close();
   };
 }
+
+// ─── Consistency sheet / 4-panel mode (M5) ────────────────────────────────
+
+export interface SheetPanel {
+  index: number;
+  seed: number;
+  imageFile: string | null;
+  imageUrl: string | null;
+  finalPrompt: string;
+  memoriesUsedCount: number;
+  error?: string;
+}
+
+export interface SheetResult {
+  id: string;
+  prompt: string;
+  width: number;
+  height: number;
+  steps: number;
+  memoryOn: boolean;
+  panels: SheetPanel[];
+  completed: number;
+  createdAt: number;
+  elapsedSeconds: number;
+}
+
+export async function startSheet(data: {
+  prompt: string;
+  panels?: number;
+  memoryOn?: boolean;
+  seeds?: number[];
+}): Promise<GenerateTicket> {
+  const res = await fetch("/api/sheet", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error: string }).error ?? "sheet failed");
+  }
+  return res.json() as Promise<GenerateTicket>;
+}
+
+/** Subscribe to a sheet job; the result arrives as a `result` event. */
+export function subscribeSheet(
+  ticket: GenerateTicket,
+  handlers: {
+    onUpdate?: (u: JobUpdate) => void;
+    onResult?: (r: SheetResult) => void;
+    onError?: (msg: string) => void;
+  },
+): () => void {
+  const es = new EventSource(ticket.streamUrl);
+  let closed = false;
+
+  const stages: JobStage[] = ["queued", "loading-model", "sampling", "decoding", "saving", "done", "error"];
+  for (const stage of stages) {
+    es.addEventListener(stage, (ev) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        if (stage === "error") handlers.onError?.((data as { error?: string }).error ?? "failed");
+        else handlers.onUpdate?.(data as JobUpdate);
+      } catch { /* ignore */ }
+    });
+  }
+
+  es.addEventListener("result", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onResult?.(JSON.parse((ev as MessageEvent).data) as SheetResult);
+    } catch { /* ignore */ }
+  });
+
+  es.addEventListener("failed", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onError?.((JSON.parse((ev as MessageEvent).data) as { error?: string }).error ?? "failed");
+    } catch { /* ignore */ }
+  });
+
+  return () => {
+    closed = true;
+    es.close();
+  };
+}

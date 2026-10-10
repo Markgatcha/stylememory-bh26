@@ -68,10 +68,38 @@ export function loadWorkflow(filePath: string): LoadedWorkflow {
   if (!existsSync(filePath)) {
     throw new Error(`Workflow file not found: ${filePath}`);
   }
-  const raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<
-    string,
-    { class_type: string; inputs: Record<string, unknown> }
-  >;
+
+  let raw: Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+  try {
+    raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<
+      string,
+      { class_type: string; inputs: Record<string, unknown> }
+    >;
+  } catch (err) {
+    // A bare parser message ("Expected property name or '}' at position 2")
+    // tells the user nothing about which file is broken or how to fix it.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Workflow file is not valid JSON: ${filePath}\n` +
+        `  parser said: ${detail}\n` +
+        `  Expected ComfyUI API format (menu -> Export (API)). ` +
+        `Editor-format workflows have a top-level "nodes" array and are not accepted.`,
+    );
+  }
+
+  // Reject editor-format workflows explicitly. They parse fine as JSON but
+  // have a top-level "nodes"/"links" shape instead of node-id keys, so
+  // without this check they fail later with a confusing "missing required
+  // nodes" error that sends the user looking in the wrong place.
+  const looksLikeEditorFormat =
+    Array.isArray((raw as Record<string, unknown>).nodes) ||
+    Array.isArray((raw as { links?: unknown }).links);
+  if (looksLikeEditorFormat) {
+    throw new Error(
+      `Workflow file is in ComfyUI EDITOR format, not API format: ${filePath}\n` +
+        `  In ComfyUI: menu -> Export (API), then save over this file.`,
+    );
+  }
 
   const nodes: Partial<WorkflowNodes> = {};
   const encodeNodes: string[] = [];

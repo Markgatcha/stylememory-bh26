@@ -18,6 +18,7 @@ import { processFeedback, listQuarantine, approveQuarantine, rejectQuarantine } 
 import { inspectAll, inspectHistory, inspectGraph } from "./memory/inspect.js";
 import { runComparison } from "./compare.js";
 import { runConsistencySuite, type ConsistencyReport, type ConsistencyOptions } from "./consistency.js";
+import { runSheet, type SheetResult, type SheetOptions } from "./sheet.js";
 import { startGeneration, type GenerateRequest, type GenerateResult } from "./generate-async.js";
 import { getJob, subscribeJob, createJob, pushUpdate, finishJob, failJob } from "./jobs.js";
 import { streamSSE } from "hono/streaming";
@@ -327,6 +328,26 @@ app.post("/api/consistency", async (c) => {
       pushUpdate(job.id, { stage: "queued", message: "starting consistency suite" });
       const report = await runConsistencySuite({ ...body, jobId: job.id });
       finishJob(job.id, report);
+    } catch (err) {
+      failJob(job.id, err instanceof Error ? err.message : String(err));
+    }
+  })();
+
+  return c.json({ jobId: job.id, streamUrl: `/api/progress/${job.id}` }, 202);
+});
+
+// ─── Consistency sheet / 4-panel mode (M5) ────────────────────────────────
+
+app.post("/api/sheet", async (c) => {
+  const body = await c.req.json<SheetOptions>();
+  if (!body.prompt?.trim()) return c.json({ error: "prompt is required" }, 400);
+
+  const job = createJob<SheetResult>();
+  void (async () => {
+    try {
+      pushUpdate(job.id, { stage: "queued", message: "starting sheet" });
+      const result = await runSheet({ ...body, jobId: job.id });
+      finishJob(job.id, result);
     } catch (err) {
       failJob(job.id, err instanceof Error ? err.message : String(err));
     }

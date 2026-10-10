@@ -5,13 +5,15 @@ import {
   startGenerate, subscribeJob, submitFeedback,
   fetchQuarantine, approveQuarantine, rejectQuarantine, fetchTraits, deleteTrait,
   fetchInspect, fetchHistory, runCompare, startConsistency, subscribeConsistency,
+  startSheet, subscribeSheet,
   type HealthResponse, type Character, type StyleProfile,
   type GenerationRecord, type GenerateResult,
   type QuarantineItem, type LearnedTrait,
   type InspectedMemory, type AbResult, type JobUpdate, type ConsistencyReport,
+  type SheetResult,
 } from "./api";
 
-type Tab = "consistency" | "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
+type Tab = "sheet" | "consistency" | "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -68,6 +70,7 @@ export default function App() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "compare", label: "A / B Compare" },
+    { key: "sheet", label: "4-Panel" },
     { key: "consistency", label: "Consistency" },
     { key: "generate", label: "Generate" },
     { key: "characters", label: `Characters (${characters.length})` },
@@ -114,6 +117,7 @@ export default function App() {
         ))}
       </nav>
 
+      {tab === "sheet" && <SheetTab />}
       {tab === "compare" && <CompareTab />}
       {tab === "consistency" && <ConsistencyTab />}
       {tab === "generate" && <GenerateTab characters={characters} styles={styles} onGenerated={reload} />}
@@ -781,6 +785,144 @@ function QuarantineTab({ quarantine, onResolved }: { quarantine: QuarantineItem[
                 </span>
                 <span className="text-neutral-400">"{q.text}"</span>
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── 4-Panel Sheet Tab (M5) ───────────────────────────────────────────────
+
+function SheetTab() {
+  const [prompt, setPrompt] = useState("Kai skateboarding at sunset");
+  const [panels, setPanels] = useState(4);
+  const [memoryOn, setMemoryOn] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SheetResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<JobUpdate | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopRef.current?.(), []);
+
+  async function handleRun() {
+    if (!prompt.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setProgress({ stage: "queued", message: "starting" });
+    try {
+      const ticket = await startSheet({ prompt, panels, memoryOn });
+      stopRef.current = subscribeSheet(ticket, {
+        onUpdate: (u) => setProgress(u),
+        onResult: (r) => {
+          setResult(r);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+        },
+        onError: (msg) => {
+          setError(msg);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+        },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLoading(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-neutral-300">4-Panel Consistency Sheet</h3>
+        <p className="mb-3 text-xs text-neutral-500">
+          The same prompt generated several times with <strong className="text-neutral-400">distinct
+          pinned seeds</strong> at the same size — the classic character-consistency sheet. Each
+          panel lists its seed, so any one of them can be reproduced exactly.
+        </p>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={2}
+          placeholder="Kai skateboarding at sunset"
+          className="w-full rounded border border-neutral-700 bg-neutral-900 p-3 text-sm text-white placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-neutral-400">
+            Panels
+            <select
+              value={panels}
+              onChange={(e) => setPanels(Number(e.target.value))}
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-white"
+            >
+              {[2, 4, 6, 8].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-neutral-400">
+            <input
+              type="checkbox"
+              checked={memoryOn}
+              onChange={(e) => setMemoryOn(e.target.checked)}
+              className="rounded"
+            />
+            Memory ON
+          </label>
+          <button
+            onClick={handleRun}
+            disabled={loading || !prompt.trim()}
+            className="rounded bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-neutral-200 disabled:opacity-40"
+          >
+            {loading ? "Generating…" : "Generate sheet"}
+          </button>
+        </div>
+        {loading && <ProgressBar update={progress} />}
+        {loading && (
+          <p className="mt-2 text-xs text-neutral-600">
+            {panels} sequential generations — roughly {Math.round(panels * 0.9)} min.
+          </p>
+        )}
+        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+      </section>
+
+      {result && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-neutral-800 bg-neutral-900/50 px-4 py-2 text-xs text-neutral-500">
+            <span>
+              completed <strong className="text-neutral-300">{result.completed}/{result.panels.length}</strong>
+            </span>
+            <span>{result.width}×{result.height}</span>
+            <span>{result.steps} steps</span>
+            <span>memory {result.memoryOn ? "ON" : "OFF"}</span>
+            <span className="text-neutral-600">{result.elapsedSeconds}s</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {result.panels.map((p) => (
+              <figure key={p.index} className="overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50">
+                {p.imageUrl ? (
+                  <img src={p.imageUrl} alt={`panel ${p.index}`} className="w-full" />
+                ) : (
+                  <div className="flex aspect-square items-center justify-center p-4 text-center text-xs text-red-400">
+                    panel {p.index} failed
+                    {p.error && <span className="mt-1 block text-neutral-600">{p.error}</span>}
+                  </div>
+                )}
+                <figcaption className="space-y-0.5 px-3 py-2 text-[10px] text-neutral-600">
+                  <div>panel {p.index}</div>
+                  <div className="text-neutral-500">seed {p.seed}</div>
+                  {p.memoriesUsedCount > 0 && (
+                    <div className="text-green-400/80">{p.memoriesUsedCount} memor{p.memoriesUsedCount === 1 ? "y" : "ies"}</div>
+                  )}
+                </figcaption>
+              </figure>
             ))}
           </div>
         </section>

@@ -37,3 +37,5 @@ data/consistency-reports.json
 data/*.txt
 data/*.json
 data/*.txt
+data/*.json
+data/*.txt
