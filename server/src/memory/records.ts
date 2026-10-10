@@ -370,6 +370,19 @@ export async function deleteTrait(memosNodeId: string): Promise<boolean> {
   return memos.forget(memosNodeId);
 }
 
+/**
+ * Delete a character or style outright via `forget()`.
+ *
+ * Distinct from supersede(): supersede marks a version historical and keeps
+ * the chain queryable, which is what an EDIT wants. A delete means the user
+ * no longer wants this record at all. Characters and styles are app-level
+ * records, so deletion goes through forget() on the current MemOS node.
+ */
+export async function deleteRecord(memosNodeId: string): Promise<boolean> {
+  const memos = await getMemOS();
+  return memos.forget(memosNodeId);
+}
+
 /** Extract a field value from the structured content string. */
 function extractField(content: string, field: string): string | null {
   const match = content.match(new RegExp(`${field}:\\s*(.+)`, "i"));

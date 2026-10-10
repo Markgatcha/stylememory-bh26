@@ -85,6 +85,14 @@ export async function updateStyle(id: string, data: Partial<StyleProfile>): Prom
   return res.json() as Promise<StyleProfile>;
 }
 
+export async function deleteCharacter(id: string): Promise<void> {
+  await fetch(`/api/characters/${id}`, { method: "DELETE" });
+}
+
+export async function deleteStyle(id: string): Promise<void> {
+  await fetch(`/api/styles/${id}`, { method: "DELETE" });
+}
+
 // ─── Generate ─────────────────────────────────────────────────────────────
 
 export interface RecalledMemory {
@@ -216,4 +224,67 @@ export async function fetchTraits(): Promise<LearnedTrait[]> {
 
 export async function deleteTrait(memosNodeId: string): Promise<void> {
   await fetch(`/api/traits/${memosNodeId}`, { method: "DELETE" });
+}
+
+// ─── Memory inspector (M4) ────────────────────────────────────────────────
+
+export interface InspectedMemory {
+  id: string;
+  memosNodeId: string;
+  kind: string;
+  content: string;
+  summary: string;
+  tags: string[];
+  importance: number;
+  trustScore: number;
+  source: string;
+  createdAt: number;
+  updatedAt: number;
+  accessCount: number;
+  superseded: boolean;
+}
+
+export async function fetchInspect(): Promise<InspectedMemory[]> {
+  const res = await fetch("/api/inspect");
+  return res.json() as Promise<InspectedMemory[]>;
+}
+
+export async function fetchHistory(appId: string): Promise<InspectedMemory[]> {
+  const res = await fetch(`/api/inspect/history/${appId}`);
+  return res.json() as Promise<InspectedMemory[]>;
+}
+
+// ─── A/B comparison (M4) ──────────────────────────────────────────────────
+
+export interface AbArm {
+  label: "memory-off" | "memory-on";
+  imageFile: string;
+  imageUrl: string;
+  finalPrompt: string;
+  negativePrompt: string;
+  memoriesUsed: RecalledMemory[];
+}
+
+export interface AbResult {
+  id: string;
+  prompt: string;
+  seed: number;
+  width: number;
+  height: number;
+  steps: number;
+  cfg: number;
+  arms: [AbArm, AbArm];
+}
+
+export async function runCompare(prompt: string): Promise<AbResult> {
+  const res = await fetch("/api/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error: string }).error ?? "comparison failed");
+  }
+  return res.json() as Promise<AbResult>;
 }

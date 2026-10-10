@@ -1,15 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   fetchHealth, fetchCharacters, fetchStyles, fetchGallery,
-  createCharacter, updateCharacter, createStyle, updateStyle,
+  createCharacter, updateCharacter, createStyle, updateStyle, deleteCharacter, deleteStyle,
   generate, submitFeedback,
   fetchQuarantine, approveQuarantine, rejectQuarantine, fetchTraits, deleteTrait,
+  fetchInspect, fetchHistory, runCompare,
   type HealthResponse, type Character, type StyleProfile,
   type GenerationRecord, type GenerateResult,
   type QuarantineItem, type LearnedTrait,
+  type InspectedMemory, type AbResult,
 } from "./api";
 
-type Tab = "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits";
+type Tab = "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -28,6 +30,7 @@ export default function App() {
   const [gallery, setGallery] = useState<GenerationRecord[]>([]);
   const [quarantine, setQuarantine] = useState<QuarantineItem[]>([]);
   const [traits, setTraits] = useState<LearnedTrait[]>([]);
+  const [memories, setMemories] = useState<InspectedMemory[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,18 +46,20 @@ export default function App() {
   }, []);
 
   const reload = useCallback(async () => {
-    const [c, s, g, q, t] = await Promise.all([
+    const [c, s, g, q, t, m] = await Promise.all([
       fetchCharacters().catch(() => []),
       fetchStyles().catch(() => []),
       fetchGallery().catch(() => []),
       fetchQuarantine().catch(() => []),
       fetchTraits().catch(() => []),
+      fetchInspect().catch(() => []),
     ]);
     setCharacters(c);
     setStyles(s);
     setGallery(g);
     setQuarantine(q);
     setTraits(t);
+    setMemories(m);
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
@@ -62,12 +67,14 @@ export default function App() {
   const pendingCount = quarantine.filter((q) => q.status === "pending").length;
 
   const tabs: { key: Tab; label: string }[] = [
+    { key: "compare", label: "A / B Compare" },
     { key: "generate", label: "Generate" },
     { key: "characters", label: `Characters (${characters.length})` },
     { key: "styles", label: `Styles (${styles.length})` },
     { key: "gallery", label: `Gallery (${gallery.length})` },
     { key: "quarantine", label: `Quarantine${pendingCount ? ` (${pendingCount})` : ""}` },
     { key: "traits", label: `Traits (${traits.length})` },
+    { key: "memory", label: `Memory (${memories.length})` },
   ];
 
   return (
@@ -106,12 +113,14 @@ export default function App() {
         ))}
       </nav>
 
+      {tab === "compare" && <CompareTab />}
       {tab === "generate" && <GenerateTab characters={characters} styles={styles} onGenerated={reload} />}
       {tab === "characters" && <CharactersTab characters={characters} onChanged={reload} />}
       {tab === "styles" && <StylesTab styles={styles} onChanged={reload} />}
       {tab === "gallery" && <GalleryTab gallery={gallery} onFeedback={reload} />}
       {tab === "quarantine" && <QuarantineTab quarantine={quarantine} onResolved={reload} />}
       {tab === "traits" && <TraitsTab traits={traits} onChanged={reload} />}
+      {tab === "memory" && <MemoryTab memories={memories} />}
 
       <footer className="mt-12 border-t border-neutral-800 pt-4 text-xs text-neutral-600">
         Banana Hacks 2026 · all local, no paid APIs
@@ -263,6 +272,14 @@ function CharactersTab({ characters, onChanged }: { characters: Character[]; onC
   const [editing, setEditing] = useState<Character | null>(null);
   const [form, setForm] = useState({ name: "", description: "", appearance: "", personality: "" });
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  async function remove(id: string) {
+    await deleteCharacter(id);
+    setConfirmDelete(null);
+    if (editing?.id === id) startNew();
+    onChanged();
+  }
 
   function startEdit(c: Character) {
     setEditing(c);
@@ -302,11 +319,39 @@ function CharactersTab({ characters, onChanged }: { characters: Character[]; onC
           <div key={c.id} className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
             <div className="flex items-start justify-between">
               <h4 className="font-medium text-white">{c.name}</h4>
-              <button onClick={() => startEdit(c)} className="text-xs text-neutral-500 hover:text-white">Edit</button>
+              <div className="flex shrink-0 gap-2">
+                <button onClick={() => startEdit(c)} className="text-xs text-neutral-500 hover:text-white">Edit</button>
+                <button
+                  onClick={() => setConfirmDelete(c.id)}
+                  className="text-xs text-neutral-600 hover:text-red-400"
+                  title="Delete this character"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             {c.description && <p className="mt-1 text-sm text-neutral-400">{c.description}</p>}
             {c.appearance && <p className="mt-1 text-xs text-neutral-500">Appearance: {c.appearance}</p>}
             {c.personality && <p className="mt-1 text-xs text-neutral-500">Personality: {c.personality}</p>}
+            {confirmDelete === c.id && (
+              <div className="mt-3 flex items-center gap-2 rounded border border-red-900/50 bg-red-950/30 px-3 py-2">
+                <span className="flex-1 text-xs text-red-300">
+                  Delete {c.name}? This removes every version from memory.
+                </span>
+                <button
+                  onClick={() => remove(c.id)}
+                  className="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-900/70"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="rounded px-2 py-1 text-xs text-neutral-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -365,6 +410,14 @@ function StylesTab({ styles, onChanged }: { styles: StyleProfile[]; onChanged: (
   const [editing, setEditing] = useState<StyleProfile | null>(null);
   const [form, setForm] = useState({ name: "", description: "", palette: "", styleTags: "" });
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  async function remove(id: string) {
+    await deleteStyle(id);
+    setConfirmDelete(null);
+    if (editing?.id === id) startNew();
+    onChanged();
+  }
 
   function startEdit(s: StyleProfile) {
     setEditing(s);
@@ -415,9 +468,37 @@ function StylesTab({ styles, onChanged }: { styles: StyleProfile[]; onChanged: (
           <div key={s.id} className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
             <div className="flex items-start justify-between">
               <h4 className="font-medium text-white">{s.name}</h4>
-              <button onClick={() => startEdit(s)} className="text-xs text-neutral-500 hover:text-white">Edit</button>
+              <div className="flex shrink-0 gap-2">
+                <button onClick={() => startEdit(s)} className="text-xs text-neutral-500 hover:text-white">Edit</button>
+                <button
+                  onClick={() => setConfirmDelete(s.id)}
+                  className="text-xs text-neutral-600 hover:text-red-400"
+                  title="Delete this style"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             {s.description && <p className="mt-1 text-sm text-neutral-400">{s.description}</p>}
+            {confirmDelete === s.id && (
+              <div className="mt-3 flex items-center gap-2 rounded border border-red-900/50 bg-red-950/30 px-3 py-2">
+                <span className="flex-1 text-xs text-red-300">
+                  Delete {s.name}? This removes every version from memory.
+                </span>
+                <button
+                  onClick={() => remove(s.id)}
+                  className="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200 hover:bg-red-900/70"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="rounded px-2 py-1 text-xs text-neutral-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -652,7 +733,243 @@ function QuarantineTab({ quarantine, onResolved }: { quarantine: QuarantineItem[
   );
 }
 
-// ─── Traits Tab (M3) ──────────────────────────────────────────────────────
+// ─── Compare Tab (M4) ─────────────────────────────────────────────────────
+
+function CompareTab() {
+  const [prompt, setPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<AbResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [stage, setStage] = useState<string>("");
+
+  async function handleCompare() {
+    if (!prompt.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setElapsed(0);
+    setStage("generating memory-off arm");
+    const timer = setInterval(() => {
+      setElapsed((e) => {
+        if (e === 55) setStage("generating memory-on arm");
+        return e + 1;
+      });
+    }, 1000);
+    try {
+      const r = await runCompare(prompt);
+      setResult(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      clearInterval(timer);
+      setStage("");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-neutral-300">Memory OFF vs ON</h3>
+        <p className="mb-3 text-xs text-neutral-500">
+          Both images use the <strong className="text-neutral-400">same seed</strong> and the same
+          size, so any difference comes from memory alone.
+        </p>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={2}
+          placeholder="Kai skateboarding at sunset"
+          className="w-full rounded border border-neutral-700 bg-neutral-900 p-3 text-sm text-white placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+        />
+        <button
+          onClick={handleCompare}
+          disabled={loading || !prompt.trim()}
+          className="mt-3 rounded bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-neutral-200 disabled:opacity-40"
+        >
+          {loading ? `${stage} — ${elapsed}s` : "Run comparison"}
+        </button>
+        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+        {loading && (
+          <p className="mt-2 text-xs text-neutral-600">
+            Two full generations, sequential — roughly 2 minutes at 8 steps.
+          </p>
+        )}
+      </section>
+
+      {result && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-neutral-800 bg-neutral-900/50 px-4 py-2 text-xs text-neutral-500">
+            <span>seed <strong className="text-neutral-300">{result.seed}</strong></span>
+            <span>{result.width}×{result.height}</span>
+            <span>{result.steps} steps</span>
+            <span>cfg {result.cfg}</span>
+            <span className="text-neutral-600">identical across both images</span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {result.arms.map((arm) => (
+              <div key={arm.label} className="rounded-lg border border-neutral-800 bg-neutral-900/50 overflow-hidden">
+                <div className={`px-4 py-2 text-xs font-semibold uppercase tracking-wide ${
+                  arm.label === "memory-on"
+                    ? "bg-green-900/30 text-green-300"
+                    : "bg-neutral-800/60 text-neutral-400"
+                }`}>
+                  {arm.label === "memory-on" ? "Memory ON" : "Memory OFF"}
+                </div>
+                <img src={arm.imageUrl} alt={arm.label} className="w-full" />
+                <div className="space-y-2 p-3 text-xs">
+                  <div>
+                    <span className="text-neutral-500">prompt sent: </span>
+                    <span className="text-neutral-300 break-words">{arm.finalPrompt}</span>
+                  </div>
+                  {arm.memoriesUsed.length > 0 ? (
+                    <div>
+                      <span className="text-neutral-500">memories used ({arm.memoriesUsed.length}):</span>
+                      <ul className="mt-1 space-y-1">
+                        {arm.memoriesUsed.map((m) => (
+                          <li key={m.id} className="rounded bg-neutral-800/50 px-2 py-1 text-neutral-400">
+                            <span className="mr-1 rounded bg-neutral-700 px-1 text-[10px] uppercase">{m.kind}</span>
+                            {m.content.slice(0, 90)}{m.content.length > 90 ? "…" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-neutral-600">no memories recalled</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── Memory Tab (M4) ──────────────────────────────────────────────────────
+
+function MemoryTab({ memories }: { memories: InspectedMemory[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [history, setHistory] = useState<Record<string, InspectedMemory[]>>({});
+  const [loadingHistory, setLoadingHistory] = useState<string | null>(null);
+
+  async function toggleHistory(appId: string) {
+    if (expanded === appId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(appId);
+    if (!history[appId]) {
+      setLoadingHistory(appId);
+      try {
+        const chain = await fetchHistory(appId);
+        setHistory((h) => ({ ...h, [appId]: chain }));
+      } finally {
+        setLoadingHistory(null);
+      }
+    }
+  }
+
+  if (memories.length === 0) {
+    return (
+      <p className="text-sm text-neutral-600">
+        Memory is empty. Create a character or style, or let feedback teach a trait.
+      </p>
+    );
+  }
+
+  const kindColor: Record<string, string> = {
+    character: "bg-blue-900/40 text-blue-300",
+    style: "bg-purple-900/40 text-purple-300",
+    avoid: "bg-red-900/40 text-red-300",
+    prefer: "bg-green-900/40 text-green-300",
+    unknown: "bg-neutral-800 text-neutral-400",
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-500">
+        Everything currently in memory, newest first. Click a record to see its full
+        content and version history.
+      </p>
+      {memories.map((m) => {
+        const isOpen = expanded === m.id;
+        const chain = history[m.id];
+        return (
+          <div key={m.memosNodeId} className="rounded-lg border border-neutral-800 bg-neutral-900/50">
+            <button
+              onClick={() => toggleHistory(m.id)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+            >
+              <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] uppercase ${kindColor[m.kind] ?? kindColor.unknown}`}>
+                {m.kind}
+              </span>
+              <span className="flex-1 truncate text-sm text-neutral-300">
+                {m.content.split("\n")[0]}
+              </span>
+              <span className="shrink-0 text-[10px] text-neutral-600">
+                imp {m.importance.toFixed(2)} · trust {m.trustScore.toFixed(2)} · ×{m.accessCount}
+              </span>
+              <span className="shrink-0 text-neutral-600">{isOpen ? "▾" : "▸"}</span>
+            </button>
+
+            {isOpen && (
+              <div className="space-y-3 border-t border-neutral-800 px-4 py-3 text-xs">
+                <pre className="whitespace-pre-wrap break-words rounded bg-neutral-950 p-3 text-neutral-400">
+                  {m.content}
+                </pre>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-neutral-600">
+                  <span>id: <span className="text-neutral-500">{m.id}</span></span>
+                  <span>node: <span className="text-neutral-500">{m.memosNodeId}</span></span>
+                  <span>source: <span className="text-neutral-500">{m.source}</span></span>
+                  <span>created: <span className="text-neutral-500">{new Date(m.createdAt).toLocaleString()}</span></span>
+                  <span>updated: <span className="text-neutral-500">{new Date(m.updatedAt).toLocaleString()}</span></span>
+                </div>
+                {m.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {m.tags.map((t) => (
+                      <span key={t} className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <p className="mb-1 text-neutral-500">
+                    version history
+                    {loadingHistory === m.id && " — loading…"}
+                  </p>
+                  {chain && chain.length === 0 && (
+                    <p className="text-neutral-600">No history recorded.</p>
+                  )}
+                  {chain && chain.length > 0 && (
+                    <ol className="space-y-1">
+                      {chain.map((v, i) => (
+                        <li key={v.memosNodeId} className="flex items-start gap-2 rounded bg-neutral-950 px-3 py-2">
+                          <span className="shrink-0 text-neutral-600">v{i + 1}</span>
+                          <span className={`shrink-0 rounded px-1.5 text-[10px] ${v.superseded ? "bg-neutral-800 text-neutral-500" : "bg-green-900/40 text-green-300"}`}>
+                            {v.superseded ? "superseded" : "current"}
+                          </span>
+                          <span className="whitespace-pre-wrap break-words text-neutral-400">
+                            {v.content.split("\n").slice(1).join(" · ") || v.content}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function TraitsTab({ traits, onChanged }: { traits: LearnedTrait[]; onChanged: () => void }) {
   const avoids = traits.filter((t) => t.kind === "avoid");

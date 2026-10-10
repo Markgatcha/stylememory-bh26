@@ -12,12 +12,14 @@ import { loadWorkflow } from "./comfyui/introspect.js";
 import { appendGeneration, loadGenerations, updateGeneration } from "./generations.js";
 import {
   storeCharacter, updateCharacter, storeStyle, updateStyle,
-  recallMemories, listCharacters, listStyles, listTraits, deleteTrait,
+  recallMemories, listCharacters, listStyles, listTraits, deleteTrait, deleteRecord,
   type RecalledMemory,
 } from "./memory/records.js";
 import { buildEnrichedPrompt } from "./prompt/builder.js";
 import { nextSeed } from "./seed-state.js";
 import { processFeedback, listQuarantine, approveQuarantine, rejectQuarantine } from "./memory/feedback.js";
+import { inspectAll, inspectHistory, inspectGraph } from "./memory/inspect.js";
+import { runComparison } from "./compare.js";
 
 ensureDirs();
 
@@ -57,7 +59,7 @@ app.get("/api/health", async (c) => {
 
   const payload: HealthResponse = {
     status: comfyui.reachable && supersedeSupport ? "ok" : "degraded",
-    milestone: "M3",
+    milestone: "M4",
     comfyui: { reachable: comfyui.reachable, version: comfyui.version, url: COMFYUI_URL, error: comfyui.error },
     memos: { ready: true, count: memosCount, dbPath: NAMESPACE },
     workflow: { loaded: workflowLoaded, file: WORKFLOW_FILE },
@@ -240,6 +242,16 @@ app.put("/api/characters/:id", async (c) => {
   return c.json(updated);
 });
 
+app.delete("/api/characters/:id", async (c) => {
+  const id = c.req.param("id");
+  const chars = await listCharacters();
+  const existing = chars.find((ch) => ch.id === id);
+  if (!existing) return c.json({ error: "character not found" }, 404);
+  const ok = await deleteRecord(existing.memosNodeId);
+  if (!ok) return c.json({ error: "delete failed" }, 500);
+  return c.json({ ok: true });
+});
+
 // ─── Styles ───────────────────────────────────────────────────────────────
 
 app.get("/api/styles", async (c) => c.json(await listStyles()));
@@ -264,6 +276,16 @@ app.put("/api/styles/:id", async (c) => {
   if (!existing) return c.json({ error: "style not found" }, 404);
   const updated = await updateStyle(existing, body);
   return c.json(updated);
+});
+
+app.delete("/api/styles/:id", async (c) => {
+  const id = c.req.param("id");
+  const styles = await listStyles();
+  const existing = styles.find((s) => s.id === id);
+  if (!existing) return c.json({ error: "style not found" }, 404);
+  const ok = await deleteRecord(existing.memosNodeId);
+  if (!ok) return c.json({ error: "delete failed" }, 500);
+  return c.json({ ok: true });
 });
 
 // ─── Traits ───────────────────────────────────────────────────────────────
@@ -320,6 +342,30 @@ app.post("/api/quarantine/:id/reject", (c) => {
   const item = rejectQuarantine(c.req.param("id"));
   if (!item) return c.json({ error: "quarantine item not found or already resolved" }, 404);
   return c.json(item);
+});
+
+// ─── Memory inspector (M4) ────────────────────────────────────────────────
+
+app.get("/api/inspect", async (c) => c.json(await inspectAll()));
+
+app.get("/api/inspect/history/:appId", async (c) => {
+  const chain = await inspectHistory(c.req.param("appId"));
+  return c.json(chain);
+});
+
+app.get("/api/inspect/graph", async (c) => c.json(await inspectGraph()));
+
+// ─── A/B comparison (M4) ──────────────────────────────────────────────────
+
+app.post("/api/compare", async (c) => {
+  const body = await c.req.json<{ prompt: string }>();
+  if (!body.prompt?.trim()) return c.json({ error: "prompt is required" }, 400);
+  try {
+    const result = await runComparison(body.prompt);
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+  }
 });
 
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) }, (info) => {

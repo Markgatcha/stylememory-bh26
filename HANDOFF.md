@@ -51,7 +51,38 @@ Last updated: Fri Oct 9, 2026 ~11:30 PM EDT (mid-M2)
   quarantine confirmed to gate an identity-touching note out of memory
   until approved; approve → present in memory; approve twice → 404.
 
-### Post-M3 fixes (all traced to root cause)
+### M4 — Memory inspector + A/B comparison ✓
+
+**Memory inspector** (`GET /api/inspect`, `GET /api/inspect/history/:appId`,
+`GET /api/inspect/graph`):
+- Lists every active memory with kind, content, tags, importance, trust,
+  access count, source and timestamps
+- Version history walks the full supersede chain — requires
+  `includeHistorical: true`, since superseded nodes are excluded from the
+  default search and would otherwise only ever show v1
+- Graph view exposes `temporal_precedes` edges created by `supersede()`
+
+**A/B comparison** (`POST /api/compare`, "A / B Compare" tab):
+- Generates the same prompt twice with **one shared seed** and identical size
+- The seed is generated once inside `compare.ts` and passed to both arms. It
+  deliberately does NOT use the rotation counter and does not advance it —
+  otherwise the two runs would differ by seed and prove nothing.
+- Arms run sequentially (ComfyUI executes one job at a time)
+- Both arms are recorded in the gallery
+- UI shows both images side by side with both final prompts and the memory list
+
+**Delete** (`DELETE /api/characters|styles|traits/:id`) via `forget()`, with a
+confirm step in the UI. Distinct from `supersede()`: an edit keeps history
+queryable, a delete removes the record entirely.
+
+**Verified:**
+- Version history: created a character, edited twice → v1/v2 marked
+  superseded, v3 current, correct order
+- A/B: seed `150634584270736` shared by both arms, images differ.
+  Memory OFF → light brown hair, grey t-shirt, standing pose.
+  Memory ON → electric blue hair, red windbreaker, ripped jeans, crouching.
+  Same seed, same prompt, so the difference is attributable to memory alone.
+- Delete: removes the record; deleting a missing id returns 404
 - `8983740` Seed rotation: unpinned generations take lastSeed+1 from a
   persistent counter; pinned seeds (A/B) bypass it.
 - `7a243a7` Memory contamination: removed an importance-ranked recall
@@ -63,28 +94,56 @@ Last updated: Fri Oct 9, 2026 ~11:30 PM EDT (mid-M2)
   sigma schedule is baked into the checkpoint; 25 steps starved the
   fine-detail phase (sharp ground, under-denoised fur).
 
-## What's Next (M4)
+## What's Next (M5 — Sunday AM)
 
-- Memory inspector: browse every stored memory (characters, styles, traits),
-  see its content/tags/metadata, and view version history for superseded
-  character edits (`getGraph()` / `searchTemporal()`)
-- Memory OFF vs ON **side-by-side** with an identical pinned seed and size,
-  showing both final prompts next to both images. The single-toggle A/B
-  already exists in the API (`memoryOff`, `seed`); what is missing is the
-  two-up view and the automatic seed pinning so the comparison is honest.
+Polish, README, bug fixes only. No new features.
+
+### Remaining known gaps (priority order)
+
+1. **WebSocket real-time progress bar** — still an elapsed-seconds counter.
+   `streamProgress()` exists in `server/src/comfyui/client.ts` but is not
+   wired to a browser-facing endpoint. Needs an SSE or WS route from Hono.
+   This is the most visible polish item for a live demo.
+2. **Style palette / styleTags don't round-trip** in the list view — they are
+   stored in the MemOS content string, not as structured fields. They do reach
+   the prompt; the list just can't show them.
+3. **4-panel consistency mode** — not started (could-have).
+4. **Character sheet PNG export** — not started (could-have).
+
+### Cut order if time runs short
+LoRA → PNG export → 4-panel consistency → before/after falls back to two
+screenshots. The six MUST features are never cut.
+
+### Demo script (3 min, leads with the strongest evidence)
+
+1. **0:00–0:45 — A/B Compare tab.** Same seed, memory off vs on. Point at the
+   hair and the jacket changing. This is the single most persuasive screen:
+   it proves memory is load-bearing, not decorative. (Row C + Row A)
+2. **0:45–1:30 — Memory tab.** Expand Kai, show the version chain with
+   superseded v1/v2 and current v3. Shows real engineering, not a wrapper.
+   (Row A)
+3. **1:30–2:15 — Feedback loop.** Thumbs-down an image with a note, watch it
+   land in Traits, then show a note that gets *quarantined* instead of
+   trusted. Explains why the memory stays clean. (Row B)
+4. **2:15–3:00 — Architecture + problem.** Comic artists / indie devs who
+   can't keep a character consistent across sessions. One local install, no
+   paid APIs, memory persists across restarts.
 
 ### Rubric notes (Banana Hacks 2026 scoring criteria)
 
-- **Row C (Image AI theme):** already at the top band. Remove the memory
-  engine and generation has nothing to condition on — the product stops
-  working. Nothing to add.
-- **Row A (Technical execution):** the multi-step pipeline (recall → prompt
-  build → ComfyUI → feedback → re-store) plus the CFG-1 positive-prompt
-  negation and supersede-based versioning is the evidence here. M4's
-  side-by-side makes it legible to a judge in one screen.
-- **Row E (Design/demo):** the 3-minute demo should lead with M4's
-  side-by-side — same seed, memory off vs on — because it proves the
-  memory engine is load-bearing rather than decorative.
+- **Row C (Image AI theme):** top band. Remove the memory engine and
+  generation has nothing to condition on — the product stops working.
+- **Row A (Technical):** the multi-step pipeline (recall → prompt build →
+  ComfyUI → feedback → re-store), CFG-1 positive-prompt negation, and
+  supersede-based versioning are the evidence. M4's side-by-side makes it
+  legible in one screen.
+- **Row B (Innovation):** the quarantine gate is the original twist — most
+  feedback systems write straight to memory; refusing to trust
+  identity-level feedback is a defensible design choice worth calling out.
+- **Row D (Impact):** comic artists and indie game devs are the named user.
+  Local-first, no paid APIs, memory survives restarts.
+- **Row E (Design/demo):** lead with the A/B compare. Close gap #1 (progress
+  bar) if time allows.
 
 ## How to Run
 
