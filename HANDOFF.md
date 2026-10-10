@@ -123,9 +123,12 @@ ComfyUI must be running on 127.0.0.1:8188 (it is, as a background service).
 
 ## Environment Facts
 
-- GPU: RTX 5050 Laptop, 8GB VRAM
+- GPU: RTX 5050 Laptop, 8GB VRAM (ComfyUI self-limits to ~3.8GB)
 - Model: qwen-image-2.1-turbo-Q5_0.gguf (4.19GB, 8-step, CFG 1)
 - Text encoder: qwen3vl_8b_int8_convrot.safetensors
 - VAE: qwen_image_2.1_vae_bf16.safetensors
 - Generation time: ~140s at 1024×1024, 25 steps
 - Ports: API 3001, web 5173, ComfyUI 8188
+- ComfyUI launch flags: see `docs/comfyui-launch-flags.md` — `--fast
+  fp8_matrix_mult` was removed because FP8 matmuls were degrading image
+  quality (soft subject, color drift).
