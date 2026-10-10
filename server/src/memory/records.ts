@@ -257,36 +257,32 @@ export async function recallMemories(prompt: string, limit = 10): Promise<Recall
     }
   }
 
-  // 2. Tag-based search for characters and styles (if not already recalled)
-  if (recalled.size < 3) {
-    const byTag = await memos.search({
-      namespace: "stylememory",
-      limit: 10,
-      sortBy: "importance",
-      sortOrder: "desc",
-    });
-    for (const sm of byTag) {
-      if (!recalled.has(sm.node.id)) {
-        recalled.set(sm.node.id, {
-          id: sm.node.id,
-          content: sm.node.content,
-          tags: sm.node.tags,
-          kind: (sm.node.metadata.kind as string) ?? "unknown",
-          reason: "tag-match",
-          score: sm.score,
-        });
-      }
-    }
-  }
+  // 2. REMOVED: unconditional "top by importance" fallback.
+  //
+  // It caused a real bug: this search returns a constant score of 1.0 for
+  // every node regardless of the query (verified against MemOS 1.6.26), and
+  // full-text search returns no rows at all for prose queries. So the
+  // fallback silently injected the highest-importance character into every
+  // unrelated prompt — "a red fox in a forest" came back wearing Kai's
+  // jacket, because Kai was simply the most important memory in the store.
+  //
+  // Recall now relies on the two paths that carry real signal:
+  //   (a) whole-word name match against stored character/style names
+  //   (b) MemOS full-text search with a relevance floor
+  // Plus avoid-traits, which are always-on by design.
 
-  // 3. Full-text search
+  // 3. Full-text search — only keep results with meaningful relevance.
+  // The raw score is cosine similarity in [0,1]; a query with no real
+  // overlap with a memory still returns a small non-zero score, so a bare
+  // "top N" pull would inject irrelevant memories into unrelated prompts.
+  // Threshold at 0.25 — below that the match is noise.
   const textResults = await memos.search({
     namespace: "stylememory",
     query: prompt,
     limit,
   });
   for (const sm of textResults) {
-    if (!recalled.has(sm.node.id)) {
+    if (!recalled.has(sm.node.id) && sm.score >= 0.25) {
       recalled.set(sm.node.id, {
         id: sm.node.id,
         content: sm.node.content,
