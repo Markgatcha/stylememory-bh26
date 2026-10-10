@@ -79,9 +79,21 @@ relevance floor; recall now relies on the two paths that carry real signal.
 ## Accomplishments we're proud of
 
 - **A working, measurable intervention point.** The same-seed A/B turns "it
-  remembers" into something checkable. Across `[PENDING]` same-seed pairs:
-  mean pixel divergence `[PENDING]`, `[PENDING]` of pixels visibly changed,
-  memory recall rate `[PENDING]`.
+  remembers" into something checkable. Across **20 same-seed pairs** (40
+  generations, 33 min) on the prompt *"Kai skateboarding at sunset"*:
+
+  | Metric | Result |
+  |---|---|
+  | Memory recall rate | **20/20 (100%)** — every run pulled the stored character |
+  | Mean pixel divergence | **15.1%** (median 15.1%, σ 2.3 pts) |
+  | Range | 11.4% – 19.0% |
+  | Pixels visibly changed | **68.7%** mean |
+
+  The recall rate is the number that evidences memory doing work: every single
+  run retrieved the character, so no pair is an accident of matching nothing.
+  The tight spread (σ 2.3 pts across 20 independent seeds) is what makes it a
+  measurement rather than an anecdote — the effect is reproducible, not a lucky
+  draw.
 - **Quarantine.** Feedback that names a defining attribute ("hair color is
   wrong") is *held for review* rather than written to memory. It is usually a
   complaint about one character, not a general preference, and auto-storing it

@@ -35,3 +35,5 @@ data/images/*
 Thumbs.db
 data/consistency-reports.json
 data/*.txt
+data/*.json
+data/*.txt
