@@ -120,6 +120,10 @@ app.post("/api/generate", async (c) => {
   } else {
     sampler.inputs.seed = nextSeed();
   }
+  // Steps: the Turbo checkpoint ships a distilled 8-step sigma schedule.
+  // Do NOT raise this — 25 steps over-iterates the coarse phase and starves
+  // fine detail (observed: sharp ground, under-denoised fur). 8 is the value
+  // the model was trained and evaluated at.
   if (body.steps !== undefined) sampler.inputs.steps = body.steps;
 
   const latent = patched[workflow.nodes.latent]!;
@@ -170,7 +174,7 @@ app.post("/api/generate", async (c) => {
     imageFile: localName,
     width: (latent.inputs.width as number) ?? 1024,
     height: (latent.inputs.height as number) ?? 1024,
-    steps: (sampler.inputs.steps as number) ?? 25,
+    steps: (sampler.inputs.steps as number) ?? 8,
     cfg: (sampler.inputs.cfg as number) ?? 1,
     comfyuiPromptId: queueResult.prompt_id,
     feedback: null as "up" | "down" | null,
