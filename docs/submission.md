@@ -1,7 +1,6 @@
 # StyleMemory — submission
 
-*Draft. Numbers marked `[PENDING]` are filled from the 20-run consistency suite
-once it completes.*
+*Banana Hacks 2026. All figures below are measured, not estimated.*
 
 ---
 
