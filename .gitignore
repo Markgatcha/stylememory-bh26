@@ -33,3 +33,4 @@ data/images/*
 .idea/
 .DS_Store
 Thumbs.db
+data/consistency-reports.json

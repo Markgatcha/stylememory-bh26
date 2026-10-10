@@ -376,3 +376,94 @@ export async function runCompare(prompt: string): Promise<AbResult> {
   }
   return res.json() as Promise<AbResult>;
 }
+
+// ─── Consistency suite (M5) ───────────────────────────────────────────────
+
+export interface ConsistencyRun {
+  index: number;
+  seed: number;
+  pixelDelta: number;
+  normalisedDelta: number;
+  changedFraction: number;
+  recalled: boolean;
+  memoriesUsedCount: number;
+  offImage: string;
+  onImage: string;
+}
+
+export interface ConsistencyReport {
+  id: string;
+  prompt: string;
+  runs: number;
+  width: number;
+  height: number;
+  steps: number;
+  createdAt: number;
+  results: ConsistencyRun[];
+  meanNormalisedDelta: number;
+  meanChangedFraction: number;
+  recallRate: number;
+  elapsedSeconds: number;
+}
+
+export interface GenerateTicket {
+  jobId: string;
+  streamUrl: string;
+}
+
+export async function startConsistency(data: { prompt: string; runs?: number }): Promise<GenerateTicket> {
+  const res = await fetch("/api/consistency", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error: string }).error ?? "consistency suite failed");
+  }
+  return res.json() as Promise<GenerateTicket>;
+}
+
+/** Subscribe to a consistency job; the result arrives as a `result` event. */
+export function subscribeConsistency(
+  ticket: GenerateTicket,
+  handlers: {
+    onUpdate?: (u: JobUpdate) => void;
+    onResult?: (r: ConsistencyReport) => void;
+    onError?: (msg: string) => void;
+  },
+): () => void {
+  const es = new EventSource(ticket.streamUrl);
+  let closed = false;
+
+  const stages: JobStage[] = ["queued", "loading-model", "sampling", "decoding", "saving", "done", "error"];
+  for (const stage of stages) {
+    es.addEventListener(stage, (ev) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        if (stage === "error") handlers.onError?.((data as { error?: string }).error ?? "failed");
+        else handlers.onUpdate?.(data as JobUpdate);
+      } catch { /* ignore */ }
+    });
+  }
+
+  es.addEventListener("result", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onResult?.(JSON.parse((ev as MessageEvent).data) as ConsistencyReport);
+    } catch { /* ignore */ }
+  });
+
+  es.addEventListener("failed", (ev) => {
+    if (closed) return;
+    try {
+      handlers.onError?.((JSON.parse((ev as MessageEvent).data) as { error?: string }).error ?? "failed");
+    } catch { /* ignore */ }
+  });
+
+  return () => {
+    closed = true;
+    es.close();
+  };
+}

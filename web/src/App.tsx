@@ -4,14 +4,14 @@ import {
   createCharacter, updateCharacter, createStyle, updateStyle, deleteCharacter, deleteStyle,
   startGenerate, subscribeJob, submitFeedback,
   fetchQuarantine, approveQuarantine, rejectQuarantine, fetchTraits, deleteTrait,
-  fetchInspect, fetchHistory, runCompare,
+  fetchInspect, fetchHistory, runCompare, startConsistency, subscribeConsistency,
   type HealthResponse, type Character, type StyleProfile,
   type GenerationRecord, type GenerateResult,
   type QuarantineItem, type LearnedTrait,
-  type InspectedMemory, type AbResult, type JobUpdate,
+  type InspectedMemory, type AbResult, type JobUpdate, type ConsistencyReport,
 } from "./api";
 
-type Tab = "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
+type Tab = "consistency" | "compare" | "generate" | "characters" | "styles" | "gallery" | "quarantine" | "traits" | "memory";
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -68,6 +68,7 @@ export default function App() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "compare", label: "A / B Compare" },
+    { key: "consistency", label: "Consistency" },
     { key: "generate", label: "Generate" },
     { key: "characters", label: `Characters (${characters.length})` },
     { key: "styles", label: `Styles (${styles.length})` },
@@ -114,6 +115,7 @@ export default function App() {
       </nav>
 
       {tab === "compare" && <CompareTab />}
+      {tab === "consistency" && <ConsistencyTab />}
       {tab === "generate" && <GenerateTab characters={characters} styles={styles} onGenerated={reload} />}
       {tab === "characters" && <CharactersTab characters={characters} onChanged={reload} />}
       {tab === "styles" && <StylesTab styles={styles} onChanged={reload} />}
@@ -783,6 +785,160 @@ function QuarantineTab({ quarantine, onResolved }: { quarantine: QuarantineItem[
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+// ─── Consistency Tab (M5) ─────────────────────────────────────────────────
+
+function ConsistencyTab() {
+  const [prompt, setPrompt] = useState("Kai skateboarding at sunset");
+  const [runs, setRuns] = useState(3);
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<ConsistencyReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<JobUpdate | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopRef.current?.(), []);
+
+  async function handleRun() {
+    if (!prompt.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    setProgress({ stage: "queued", message: "starting suite" });
+    try {
+      const ticket = await startConsistency({ prompt, runs });
+      stopRef.current = subscribeConsistency(ticket, {
+        onUpdate: (u) => setProgress(u),
+        onResult: (r) => {
+          setReport(r);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+        },
+        onError: (msg) => {
+          setError(msg);
+          setLoading(false);
+          setProgress(null);
+          stopRef.current?.();
+        },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLoading(false);
+      setProgress(null);
+    }
+  }
+
+  const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-neutral-300">Consistency Score</h3>
+        <p className="mb-3 text-xs text-neutral-500">
+          Runs the same prompt N times as same-seed pairs (memory off vs on) and reports how far
+          apart the two images land. Same seed and size, so the only variable is memory.
+        </p>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={2}
+          placeholder="Kai skateboarding at sunset"
+          className="w-full rounded border border-neutral-700 bg-neutral-900 p-3 text-sm text-white placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+        />
+        <div className="mt-3 flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-neutral-400">
+            Runs
+            <select
+              value={runs}
+              onChange={(e) => setRuns(Number(e.target.value))}
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-white"
+            >
+              {[1, 2, 3, 5].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={handleRun}
+            disabled={loading || !prompt.trim()}
+            className="rounded bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-neutral-200 disabled:opacity-40"
+          >
+            {loading ? "Running…" : "Run suite"}
+          </button>
+        </div>
+        {loading && <ProgressBar update={progress} />}
+        {loading && (
+          <p className="mt-2 text-xs text-neutral-600">
+            {runs} pairs = {runs * 2} generations, sequential. Roughly {Math.round(runs * 2 * 0.9)} min.
+          </p>
+        )}
+        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+      </section>
+
+      {report && (
+        <>
+          {/* Headline numbers */}
+          <section className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-5">
+            <h3 className="mb-3 text-sm font-semibold text-neutral-300">Results</h3>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Metric label="Mean pixel delta" value={pct(report.meanNormalisedDelta)} />
+              <Metric label="Pixels changed" value={pct(report.meanChangedFraction)} />
+              <Metric label="Memory recall rate" value={pct(report.recallRate)} />
+              <Metric label="Runtime" value={`${report.elapsedSeconds}s`} />
+            </div>
+            <p className="mt-4 text-xs text-neutral-500">
+              <strong className="text-neutral-400">Recall rate</strong> is the part that evidences
+              memory doing work — the fraction of runs where the memory-ON arm actually pulled a
+              stored memory. <strong className="text-neutral-400">Pixel delta</strong> says how
+              loudly memory steered generation; it is a proxy, not a quality judgement.
+            </p>
+          </section>
+
+          {/* Per-run breakdown */}
+          <section className="space-y-4">
+            {report.results.map((r) => (
+              <div key={r.index} className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-neutral-500">
+                  <span className="text-neutral-300">Run {r.index}</span>
+                  <span>seed <span className="text-neutral-400">{r.seed}</span></span>
+                  <span>delta <span className="text-neutral-400">{pct(r.normalisedDelta)}</span></span>
+                  <span>changed <span className="text-neutral-400">{pct(r.changedFraction)}</span></span>
+                  <span className={r.recalled ? "text-green-400" : "text-amber-400"}>
+                    {r.recalled ? `recalled ${r.memoriesUsedCount} memor${r.memoriesUsedCount === 1 ? "y" : "ies"}` : "no memory recalled"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <figure>
+                    <img src={`/images/${r.offImage}`} alt="memory off" className="w-full rounded border border-neutral-800" />
+                    <figcaption className="mt-1 text-[10px] uppercase tracking-wide text-neutral-500">
+                      Memory OFF
+                    </figcaption>
+                  </figure>
+                  <figure>
+                    <img src={`/images/${r.onImage}`} alt="memory on" className="w-full rounded border border-neutral-800" />
+                    <figcaption className="mt-1 text-[10px] uppercase tracking-wide text-green-400/80">
+                      Memory ON
+                    </figcaption>
+                  </figure>
+                </div>
+              </div>
+            ))}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+      <div className="text-lg font-semibold text-white">{value}</div>
+      <div className="mt-0.5 text-[11px] text-neutral-500">{label}</div>
     </div>
   );
 }

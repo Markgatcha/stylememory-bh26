@@ -42,8 +42,11 @@ export interface AbResult {
 /**
  * Run one arm of the comparison. Shared by both sides so the only variable
  * between them is whether memory recall runs.
+ *
+ * Exported so the consistency suite can reuse the exact same code path —
+ * a comparison is only meaningful if both features share it.
  */
-async function runArm(
+export async function runArm(
   prompt: string,
   seed: number,
   memoryOff: boolean,

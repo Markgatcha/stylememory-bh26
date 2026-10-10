@@ -17,8 +17,9 @@ import { nextSeed } from "./seed-state.js";
 import { processFeedback, listQuarantine, approveQuarantine, rejectQuarantine } from "./memory/feedback.js";
 import { inspectAll, inspectHistory, inspectGraph } from "./memory/inspect.js";
 import { runComparison } from "./compare.js";
+import { runConsistencySuite, type ConsistencyReport, type ConsistencyOptions } from "./consistency.js";
 import { startGeneration, type GenerateRequest, type GenerateResult } from "./generate-async.js";
-import { getJob, subscribeJob } from "./jobs.js";
+import { getJob, subscribeJob, createJob, pushUpdate, finishJob, failJob } from "./jobs.js";
 import { streamSSE } from "hono/streaming";
 
 ensureDirs();
@@ -310,6 +311,28 @@ app.post("/api/compare", async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
   }
+});
+
+// ─── Consistency suite (M5) ───────────────────────────────────────────────
+
+app.post("/api/consistency", async (c) => {
+  const body = await c.req.json<ConsistencyOptions>();
+  if (!body.prompt?.trim()) return c.json({ error: "prompt is required" }, 400);
+
+  // Long-running: N pairs of full generations. Run as a job so the browser
+  // can stream progress instead of hanging on one request.
+  const job = createJob<ConsistencyReport>();
+  void (async () => {
+    try {
+      pushUpdate(job.id, { stage: "queued", message: "starting consistency suite" });
+      const report = await runConsistencySuite(body);
+      finishJob(job.id, report);
+    } catch (err) {
+      failJob(job.id, err instanceof Error ? err.message : String(err));
+    }
+  })();
+
+  return c.json({ jobId: job.id, streamUrl: `/api/progress/${job.id}` }, 202);
 });
 
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) }, (info) => {

@@ -21,6 +21,11 @@
     "m0:verify": "node scripts/verify-m0.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@types/pngjs": "^6.0.5",
+    "concurrently": "^9.1.0",
+    "server": "^1.0.42"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
   }
 }
