@@ -1,0 +1,12 @@
+event: queued
+data: {"stage":"queued","message":"starting consistency suite"}
+
+event: loading-model
+data: {"stage":"loading-model","message":"pair 1/20 — memory off","pct":0}
+
+event: error
+data: {"stage":"error","message":"fetch failed"}
+
+event: failed
+data: {"error":"fetch failed"}
+

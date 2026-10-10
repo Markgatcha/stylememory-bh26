@@ -51,8 +51,25 @@ export async function waitForCompletion(
   pollMs = 2000,
 ): Promise<Record<string, unknown>> {
   const start = Date.now();
+  let unreachableSince: number | null = null;
+
   while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${COMFYUI_URL}/history/${promptId}`);
+    let res: Response;
+    try {
+      res = await fetch(`${COMFYUI_URL}/history/${promptId}`);
+    } catch {
+      // Connection refused / reset — ComfyUI went away mid-generation. Burn
+      // through the full timeout only if it never comes back; if it stays
+      // unreachable for 20s, fail fast rather than stall the whole suite.
+      if (unreachableSince === null) unreachableSince = Date.now();
+      if (Date.now() - unreachableSince > 20_000) {
+        throw new Error(`ComfyUI unreachable at ${COMFYUI_URL} — is it still running?`);
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+      continue;
+    }
+
+    unreachableSince = null;
     if (!res.ok) throw new Error(`history ${res.status}`);
     const hist = (await res.json()) as Record<string, { outputs?: Record<string, unknown>; status?: Record<string, unknown> }>;
     const entry = hist[promptId];
