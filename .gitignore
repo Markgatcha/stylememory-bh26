@@ -34,3 +34,4 @@ data/images/*
 .DS_Store
 Thumbs.db
 data/consistency-reports.json
+data/*.txt
