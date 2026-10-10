@@ -100,15 +100,19 @@ Polish, README, bug fixes only. No new features.
 
 ### Remaining known gaps (priority order)
 
-1. **WebSocket real-time progress bar** — still an elapsed-seconds counter.
-   `streamProgress()` exists in `server/src/comfyui/client.ts` but is not
-   wired to a browser-facing endpoint. Needs an SSE or WS route from Hono.
-   This is the most visible polish item for a live demo.
+1. ~~**WebSocket real-time progress bar**~~ — **DONE** (`20e83ea`). `/api/generate`
+   returns a jobId; `GET /api/progress/:jobId` streams SSE stage + step
+   updates to a live progress bar, ending in a `result` event.
 2. **Style palette / styleTags don't round-trip** in the list view — they are
    stored in the MemOS content string, not as structured fields. They do reach
-   the prompt; the list just can't show them.
-3. **4-panel consistency mode** — not started (could-have).
-4. **Character sheet PNG export** — not started (could-have).
+   the prompt; the list just can't show them. ~30 min fix.
+3. **Consistency Score panel** — N-run A/B with a mean delta. See
+   `docs/research.md`; this is the highest-value remaining item for Rows A/E.
+4. **4-panel consistency mode** — not started (could-have).
+5. **Character sheet PNG export** — not started (could-have).
+
+See `docs/research.md` for the rubric-scored rationale behind what to build
+next, including why LoRA is deliberately NOT attempted.
 
 ### Cut order if time runs short
 LoRA → PNG export → 4-panel consistency → before/after falls back to two
