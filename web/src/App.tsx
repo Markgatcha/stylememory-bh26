@@ -800,6 +800,8 @@ function ConsistencyTab() {
   const [progress, setProgress] = useState<JobUpdate | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
 
+  // Close the EventSource if the tab unmounts mid-suite, otherwise the
+  // connection leaks for the full runtime of a 20-run job.
   useEffect(() => () => stopRef.current?.(), []);
 
   async function handleRun() {
@@ -857,7 +859,7 @@ function ConsistencyTab() {
               onChange={(e) => setRuns(Number(e.target.value))}
               className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-white"
             >
-              {[1, 2, 3, 5].map((n) => (
+              {[1, 2, 3, 5, 10, 20].map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>

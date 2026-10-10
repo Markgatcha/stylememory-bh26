@@ -59,6 +59,16 @@ export function findGeneration(id: string): GenerationRecord | undefined {
   return loadGenerations().find((r) => r.id === id);
 }
 
+/**
+ * Apply a patch to a generation record.
+ *
+ * Read-modify-write on a JSON file, so it is only safe because generations
+ * are written by one process and feedback arrives from a single-user local
+ * UI. Under concurrent writes the last writer wins and an update can be
+ * lost. Flagged rather than fixed: the correct fix is moving the index into
+ * the SQLite database MemOS already has open, which is a schema change and
+ * out of scope this close to the deadline.
+ */
 export function updateGeneration(id: string, patch: Partial<GenerationRecord>): boolean {
   const all = loadGenerations();
   const idx = all.findIndex((r) => r.id === id);

@@ -201,6 +201,23 @@ async function storeTraitDirectly(
   generationId: string,
 ): Promise<void> {
   const memos = await getMemOS();
+
+  // Guard against duplicates. A double-click on the feedback button, or a
+  // retried request, would otherwise write the same trait twice — and avoid
+  // traits are injected into EVERY future prompt, so a duplicate both wastes
+  // prompt budget and biases generation. MemOS has no unique constraint, so
+  // the check has to happen here.
+  const existing = await memos.search({
+    namespace: NAMESPACE,
+    tags: [kind],
+    limit: 200,
+  });
+  const normalise = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const target = normalise(text);
+  if (existing.some((sm) => normalise(sm.node.content) === target)) {
+    return; // already known — nothing to learn
+  }
+
   await memos.store(text, {
     tags: [kind],
     namespace: NAMESPACE,
