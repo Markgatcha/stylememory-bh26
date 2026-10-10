@@ -1,0 +1,33 @@
+# deps
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# runtime data (never commit generated state)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/generations.json
+data/images/*
+!data/images/.gitkeep
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

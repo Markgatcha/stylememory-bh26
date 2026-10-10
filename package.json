@@ -1,0 +1,26 @@
+{
+  "name": "stylememory-bh26",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.10.1",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "allowScripts": {
+    "better-sqlite3": true,
+    "esbuild": true
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "m0:verify": "node scripts/verify-m0.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
