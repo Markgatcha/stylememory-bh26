@@ -36,6 +36,7 @@ import { join } from "node:path";
 import { PNG } from "pngjs";
 import { IMAGES_DIR } from "./paths.js";
 import { runArm } from "./compare.js";
+import { pushUpdate, type JobUpdate } from "./jobs.js";
 
 export interface ConsistencyRun {
   index: number;
@@ -140,6 +141,8 @@ export interface ConsistencyOptions {
   prompt: string;
   /** How many same-seed pairs to run. Each pair is two full generations. */
   runs?: number;
+  /** Job id to report per-run progress against. Optional. */
+  jobId?: string;
 }
 
 /**
@@ -155,17 +158,33 @@ export async function runConsistencySuite(
   const prompt = opts.prompt?.trim();
   if (!prompt) throw new Error("prompt is required");
 
-  const runs = Math.max(1, Math.min(10, opts.runs ?? 3));
+  const runs = Math.max(1, Math.min(50, opts.runs ?? 3));
   const startedAt = Date.now();
   const results: ConsistencyRun[] = [];
 
   for (let i = 0; i < runs; i++) {
+    const report = (u: JobUpdate) => {
+      if (opts.jobId) {
+        pushUpdate(opts.jobId, {
+          ...u,
+          // Fold the pair index into the percentage so a 40-minute suite is
+          // legible instead of a black box.
+          pct: Math.round(((i + (u.pct ?? 0) / 100) / runs) * 100),
+          message: `pair ${i + 1}/${runs} — ${u.message ?? u.stage}`,
+        });
+      }
+    };
+
+    report({ stage: "loading-model", message: "memory off" });
+
     // Fresh random seed per run — never the rotation counter, and never
     // reused, so each pair is an independent sample.
     const seed = Math.floor(Math.random() * 2 ** 48);
 
     const off = await runArm(prompt, seed, true);
     const on = await runArm(prompt, seed, false);
+
+    report({ stage: "saving", message: "measuring", pct: 95 });
 
     const offPath = join(IMAGES_DIR, off.imageFile);
     const onPath = join(IMAGES_DIR, on.imageFile);

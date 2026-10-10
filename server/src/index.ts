@@ -325,7 +325,7 @@ app.post("/api/consistency", async (c) => {
   void (async () => {
     try {
       pushUpdate(job.id, { stage: "queued", message: "starting consistency suite" });
-      const report = await runConsistencySuite(body);
+      const report = await runConsistencySuite({ ...body, jobId: job.id });
       finishJob(job.id, report);
     } catch (err) {
       failJob(job.id, err instanceof Error ? err.message : String(err));
