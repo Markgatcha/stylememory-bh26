@@ -82,7 +82,7 @@ export default function App() {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto w-full max-w-[1800px] px-6 py-10 sm:px-8">
       <header className="mb-6 flex items-center gap-3">
         <img src="/logo.svg" alt="" aria-hidden="true" className="h-9 w-9 shrink-0" />
         <div>
