@@ -1,0 +1,73 @@
+JUDGE Q&A CHEAT SHEET — StyleMemory @ Banana Hacks 2026
+=====================================================
+NOT part of the demo video. This file exists so the recording script
+(docs/demo-script.txt) stays lean and you don't read Q&A on camera.
+Open this only when a human is actually asking questions.
+
+
+LIKELY QUESTIONS — HAVE ANSWERS READY
+=====================================================
+
+Q: "How is this different from just writing a longer prompt?"
+A: "Because it's persistent and it's measurable. A longer prompt is something
+    you retype every time and can't verify. This recalls automatically, shows
+    you which memories fired, and I can prove the delta with a same-seed A/B.
+    The 20-run suite is in the repo."
+
+Q: "Isn't this just a prompt template?"
+A: "The pipeline is recall, then construct, then diffuse, then feedback, then
+    re-store. The template is one stage. The recall has a name-match path and
+    a relevance path, edits supersede rather than overwrite, and feedback is
+    gated. That's a system, not a string format."
+
+Q: "What stops memory from getting polluted?"
+A: "Three things. A relevance floor so unrelated prompts don't inherit random
+    memories. Quarantine for anything touching identity. And every memory
+    records its trust score and source, so you can see where it came from."
+
+Q: "Why not use CLIP embeddings for recall?"
+A: "MemOS's full-text search doesn't return prose matches on this version, so
+    recall currently leans on name matching. CLIP would help semantically but
+    I have no CLIP model on disk and it wouldn't answer the harder question —
+    whether the memory-ON image is actually better. Distance isn't quality."
+
+Q: "Does the memory actually improve output, or just change it?"
+A: "Fair question, and I'd push back on the framing. Pixel divergence proves
+    memory steers generation reproducibly — 20 out of 20 runs. Whether the ON
+    image is better is a human judgement; that's why the UI shows you both
+    rather than scoring them for you."
+
+Q: "What's the hardest bug you hit?"
+A: "Memory contamination. A relevance fallback returned a constant score of 1.0
+    for every node, so the most important character got injected into EVERY
+    prompt. I caught it when 'a red fox in a forest' came back wearing a
+    character's jacket, with fur melting into the fabric. Found it by probing
+    the SDK directly instead of guessing."
+
+Q: "How long does a generation take?"
+A: "About 50 seconds at 1024 square on an 8-gig RTX 5050. The progress bar
+    streams real sampler steps."
+
+Q: "Could this scale past one machine?"
+A: "Not today — it's local-first by design, which is the point for artists who
+    can't ship their characters to a cloud API. The memory layer is the part
+    that would need to move first."
+
+
+WAR STORIES (moved out of the Memory-tab segment — same reason)
+=====================================================
+
+"If asked about difficulty — two things that bit me: Qwen runs at CFG 1, where
+ComfyUI ignores negative prompts entirely, so learned 'avoid' rules have to be
+rewritten as positive phrasing. And the Turbo checkpoint ships an 8-step
+schedule — running 25 steps starves fine detail. Both were found by measuring,
+not guessing."
+
+
+IF ASKED TO RUN IT LIVE (the recorded demo uses pre-generated pairs)
+=====================================================
+A/B Compare tab -> prompt "Kai skateboarding at sunset" -> Run comparison.
+Both arms share one seed; the app reports it. ~2 minutes for the pair.
+Judge-facing answer: "I recorded on pre-generated pairs because two live
+generations is two minutes of dead air — the measurement is the evidence;
+the images are exhibits. The suite in the repo reproduces every number."
