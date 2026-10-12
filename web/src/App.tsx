@@ -104,7 +104,7 @@ export default function App() {
         </section>
       )}
 
-      <nav className="mb-6 flex gap-1 border-b border-neutral-800">
+      <nav className="mb-6 flex w-max gap-1 border-b border-neutral-800">
         {tabs.map((t) => (
           <button
             key={t.key}
