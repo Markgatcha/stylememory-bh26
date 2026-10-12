@@ -83,11 +83,14 @@ export default function App() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-white">StyleMemory</h1>
-        <p className="mt-1 text-sm text-neutral-400">
-          An image studio that remembers — memory-conditioned generation with ComfyUI + Qwen Image 2.1 Turbo.
-        </p>
+      <header className="mb-6 flex items-center gap-3">
+        <img src="/logo.svg" alt="" aria-hidden="true" className="h-9 w-9 shrink-0" />
+        <div>
+          <h1 className="text-2xl font-bold text-white">StyleMemory</h1>
+          <p className="mt-1 text-sm text-neutral-400">
+            An image studio that remembers — memory-conditioned generation with ComfyUI + Qwen Image 2.1 Turbo.
+          </p>
+        </div>
       </header>
 
       {health && (
@@ -106,13 +109,16 @@ export default function App() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`relative px-4 py-2 text-sm font-medium transition-colors ${
               tab === t.key
-                ? "border-b-2 border-white text-white"
+                ? "text-white"
                 : "text-neutral-500 hover:text-neutral-300"
             }`}
           >
             {t.label}
+            {tab === t.key && (
+              <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-0.5 bg-white" />
+            )}
           </button>
         ))}
       </nav>
