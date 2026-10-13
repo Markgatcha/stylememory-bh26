@@ -1,0 +1,184 @@
+{
+  "title": "StyleMemory - An Image Studio That Remembers",
+  "author": "Mark Gatcha",
+  "elements": [
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "StyleMemory"
+    },
+    {
+      "type": "paragraph",
+      "text": "An image studio that remembers"
+    },
+    {
+      "type": "paragraph",
+      "text": "Banana Hacks 2026 - Image AI Hackathon"
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Inspiration"
+    },
+    {
+      "type": "paragraph",
+      "text": "Comic artists and indie game developers need the same character to look the same across dozens of images. But text-to-image generation is stateless, which means the same prompt produces a different identity every time, and nothing you generated last session carries over to this one."
+    },
+    {
+      "type": "paragraph",
+      "text": "I looked at this from the side of someone actually trying to ship a comic. A character whose face drifts between pages breaks the story faster than bad rendering does. You stop reading the characters and start noticing the mistakes."
+    },
+    {
+      "type": "paragraph",
+      "text": "The usual fix in the industry is to train a LoRA for each character. You collect 15 or more curated images, run a GPU training job, and then ship a separate model file for every character. It works, but it means a dataset and a training run for every new character you add, and it still does nothing for art styles, color palettes, or simple feedback like \"stop making it so dark.\""
+    },
+    {
+      "type": "paragraph",
+      "text": "So I asked a narrower question instead: how much consistency can you get from memory alone, with no training, no reference images, and no model file per character?"
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "What StyleMemory Does"
+    },
+    {
+      "type": "paragraph",
+      "text": "Characters, style profiles, and learned preferences all live in MemOS, a local-first memory layer I built as a separate open-source project. When you generate an image, the studio runs through five steps:"
+    },
+    {
+      "type": "paragraph",
+      "text": "1. Recall what is relevant, starting with a whole-word name match, then word-overlap search — each content word is queried individually and a memory is recalled when it shares at least two of them — plus any learned traits that are always active."
+    },
+    {
+      "type": "paragraph",
+      "text": "2. Build an enriched prompt by folding those memories into the positive conditioning."
+    },
+    {
+      "type": "paragraph",
+      "text": "3. Generate the image through ComfyUI with Qwen Image 2.1 Turbo, streaming live progress for each step."
+    },
+    {
+      "type": "paragraph",
+      "text": "4. Show its work, meaning you see the exact final prompt that was sent and the list of memories that shaped it."
+    },
+    {
+      "type": "paragraph",
+      "text": "5. Learn from feedback, so a thumbs down with a note writes a trait back to memory and the next generation improves."
+    },
+    {
+      "type": "paragraph",
+      "text": "The most important design decision here is that memory is the only thing that changes between two runs. That makes a same-seed A/B comparison an exact test of what memory contributes: same prompt, same seed, same image size, with memory switched off in one and on in the other. It turns \"it remembers your character\" into something you can actually measure instead of just claim."
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "How I Built It"
+    },
+    {
+      "type": "paragraph",
+      "text": "The stack is pnpm workspaces, a Hono and TypeScript server, a Vite and React frontend with Tailwind, ComfyUI running Qwen Image 2.1 Turbo as a Q5_0 GGUF, the @mem-os/sdk package for memory, and a JSON index alongside a local image folder. Nothing here needs a paid API."
+    },
+    {
+      "type": "paragraph",
+      "text": "The whole thing is a pipeline rather than a wrapper: recall, then prompt construction, then diffusion, then feedback, then storing the result back into memory. The ComfyUI workflow gets read from disk and inspected at runtime to find its node IDs, so nothing is hardcoded. Swapping the workflow file changes the pipeline without touching any code."
+    },
+    {
+      "type": "paragraph",
+      "text": "To measure whether memory was really doing anything, I wrote a consistency suite that runs the same prompt several times as same-seed pairs and reports two separate signals. The first is pixel divergence, which is the mean absolute difference between the memory-off and memory-on images, calculated over a grayscale projection using the standard luma formula where L = 0.299R + 0.587G + 0.114B. Because the seed and size are identical, the only difference is the prompt conditioning, so this directly measures how much memory steered the generation. The second signal is the recall rate, which is the fraction of runs where the memory-on version actually pulled up a memory. That second number matters because a prompt matching nothing stored produces an identical image, and the score should admit that rather than take credit for it."
+    },
+    {
+      "type": "paragraph",
+      "text": "Across 20 same-seed pairs, which is 40 total generations and 33 minutes of compute, using the prompt \"Kai skateboarding at sunset,\" I got the following results."
+    },
+    {
+      "type": "table",
+      "header": true,
+      "rows": [
+        ["Metric", "Result"],
+        ["Memory recall rate", "20 out of 20 (100%)"],
+        ["Mean pixel divergence", "15.1% (median 15.1%, standard deviation 2.3 points)"],
+        ["Range across runs", "11.4% to 19.0%"],
+        ["Pixels visibly changed", "68.7% on average"]
+      ]
+    },
+    {
+      "type": "paragraph",
+      "text": "The recall rate is the number that proves memory is doing real work, because every single run retrieved the character, so no pair is just an accident of matching nothing at all. The tight spread matters too. A standard deviation of only 2.3 points across 20 independent seeds is what makes this a measurement instead of an anecdote, since the effect reproduces reliably rather than being one lucky draw."
+    },
+    {
+      "type": "paragraph",
+      "text": "You can also see it by eye. The same prompt with memory off produced a generic figure with dark hair in a dark button-down shirt. With memory on, it produced the stored character, with electric blue hair, a red windbreaker, ripped jeans, and a crouched stance."
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Challenges I Ran Into"
+    },
+    {
+      "type": "paragraph",
+      "text": "CFG 1 ignores negative prompts completely. Qwen Image 2.1 runs at CFG 1, and at that setting ComfyUI throws away negative conditioning entirely. That meant learned \"avoid\" traits had to be rewritten as positive phrasing instead, so \"too dark\" became \"bright, well-lit.\" The negative prompt node only gets filled in for workflows running at a higher CFG."
+    },
+    {
+      "type": "paragraph",
+      "text": "The Turbo checkpoint wants 8 steps, not 25. It ships with a distilled 8-step sigma schedule. Running 25 steps forces that already-distilled trajectory through 25 uniform steps, which over-iterates the coarse phase and starves the fine detail. I measured this as sharp-looking ground with fur that never finished denoising. Dropping to 8 steps fixed the quality and also cut generation time by about 2.7 times."
+    },
+    {
+      "type": "paragraph",
+      "text": "Memory recall was contaminating unrelated prompts, and this was the worst bug of the whole build. A relevance fallback in MemOS was returning a constant score of 1.0 for every node no matter what the query was, so the highest-importance character was getting injected into every single prompt. I only caught it by looking at the output. I asked for \"a red fox in a forest\" and got a fox wearing the character's jacket, with its fur melting into the fabric. I fixed it by removing the fallback and adding a relevance floor, so recall now depends only on the two paths that carry real signal."
+    },
+    {
+      "type": "paragraph",
+      "text": "ComfyUI's progress events turned out to be unreliable. I measured back-to-back runs where one delivered 16 progress frames and the next delivered exactly 1. A progress bar built only on the socket would sometimes sit at 0% for an entire generation, so I made the socket drive the bar whenever it has data and added a measured clock model to keep it moving when it does not. It never claims to be finished on its own. Only the authoritative history poll is allowed to declare completion."
+    },
+    {
+      "type": "paragraph",
+      "text": "Image quality turned out to be a configuration problem before it was ever a model problem. Two of my three worst image bugs were launch flags and step count, not the checkpoint itself. The flag --fast fp8_matrix_mult alone caused visible softness and color drift, and I only found it by reading the actual process arguments instead of trusting what the images looked like."
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "What I Learned"
+    },
+    {
+      "type": "paragraph",
+      "text": "Measuring beats asserting. The consistency suite is what caught the recall bug indirectly, and it is the only reason the project's main claim can be checked by someone else. Without it I would have shipped that contamination bug and honestly probably would not have noticed."
+    },
+    {
+      "type": "paragraph",
+      "text": "Do not trust a similarity metric you cannot explain. I tested LPIPS and DreamSim for the A/B comparison and rejected both of them. Each one needs a neural model download I do not have, and neither can tell you whether the memory-on image is actually better. They measure distance, not quality. The pixel delta I report is openly a proxy for something, and the recall rate is the half of the story that actually shows memory working."
+    },
+    {
+      "type": "paragraph",
+      "text": "Sometimes refusing to trust an input is itself a feature. Feedback that names a defining attribute, like \"the hair color is wrong,\" gets quarantined instead of written straight to memory. That kind of feedback is usually a complaint about one specific character rather than a general preference, and storing it automatically would inject a meaningless phrase into every future prompt."
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "What Is Next for StyleMemory"
+    },
+    {
+      "type": "paragraph",
+      "text": "Semantic recall is the remaining gap. Prose recall now works through word-overlap search — \"a skateboarder with a scar\" finds Kai without naming him — but paraphrase with no shared words still needs an embedding model, which I deliberately skipped for this build."
+    },
+    {
+      "type": "paragraph",
+      "text": "After that comes image-reference memory, where a generated image gets attached to a character so future generations can condition on it directly using Qwen's multi-reference support. Then per-workspace memory, so one comic's cast does not bleed into a game's. And finally, running the consistency suite in CI as a regression gate that fails if mean divergence drops, so memory regressions get caught before release."
+    },
+
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Built With"
+    },
+    {
+      "type": "paragraph",
+      "text": "@mem-os/sdk, ComfyUI, Qwen Image 2.1 Turbo, Hono, React, Vite, Tailwind CSS, pnpm, TypeScript, and pngjs"
+    }
+  ]
+}
