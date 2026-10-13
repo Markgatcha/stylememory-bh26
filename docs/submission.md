@@ -126,10 +126,13 @@ relevance floor; recall now relies on the two paths that carry real signal.
 
 ## What's next for StyleMemory
 
-- **Semantic recall.** MemOS 1.6.26's full-text search returns no rows for
-  prose queries on this install, so recall currently leans on name matching.
-  Fixing that in the SDK (or adding embedding-based recall) would let memory
-  surface relevance the user never named.
+- **Semantic recall.** Prose recall now works through app-layer
+  word-overlap — each content word is queried individually and a memory
+  is recalled when it shares at least two of them, so "a skateboarder
+  with a scar" finds Kai without naming him. What remains is true
+  semantic recall: paraphrase with no shared words, which needs an
+  embedding model (the local-hash fallback scores degenerate, and a
+  multi-GB download was rejected for this hackathon).
 - **Image-reference memory.** Attach a generated image to a character so
   future generations can condition on it directly, via Qwen's multi-reference
   support.

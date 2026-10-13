@@ -86,7 +86,7 @@ pnpm build          # production web build
 
 ```
 prompt
-  → recall relevant memories (name match → relevance search → active traits)
+  → recall relevant memories (name match → word-overlap search → active traits)
   → build enriched POSITIVE prompt
   → ComfyUI + Qwen Image 2.1 Turbo
   → gallery
@@ -227,10 +227,14 @@ and the 8-step distilled schedule keeps iteration fast enough to demo live.
 - **Text-only memory.** There is no image reference or CLIP-embedding memory;
   consistency comes entirely from prompt conditioning. The A/B compare exists
   partly to measure how far that gets you.
-- **Recall is name-match driven.** MemOS 1.6.26's full-text search returns no
-  rows for prose queries on this install, so semantic recall relies on the
-  whole-word character/style name match. Text search is wired with a relevance
-  floor and will start contributing if the SDK's FTS behaviour improves.
+- **Word-overlap recall, not semantic.** MemOS 1.6.26's full-text search
+  returns no rows for prose queries on this install (the whole query is
+  wrapped as one FTS5 phrase), so recall tokenizes at the app layer: each
+  content word is queried individually and a memory is recalled when it
+  shares at least two of them — "a skateboarder with a scar" finds Kai
+  without naming him. True semantic recall — paraphrase with no shared
+  words — still needs an embedding model, which is deliberately out of
+  scope here.
 - **Style palette/tags don't round-trip** in the list view — they are stored in
   the memory content string rather than as structured fields. They do reach the
   prompt.
