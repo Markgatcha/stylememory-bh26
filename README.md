@@ -86,7 +86,7 @@ pnpm build          # production web build
 
 ```
 prompt
-  → recall relevant memories (name match → word-overlap search → active traits)
+  → recall relevant memories (name match → word-overlap + semantic search → active traits)
   → build enriched POSITIVE prompt
   → ComfyUI + Qwen Image 2.1 Turbo
   → gallery
@@ -227,14 +227,18 @@ and the 8-step distilled schedule keeps iteration fast enough to demo live.
 - **Text-only memory.** There is no image reference or CLIP-embedding memory;
   consistency comes entirely from prompt conditioning. The A/B compare exists
   partly to measure how far that gets you.
-- **Word-overlap recall, not semantic.** MemOS 1.6.26's full-text search
-  returns no rows for prose queries on this install (the whole query is
-  wrapped as one FTS5 phrase), so recall tokenizes at the app layer: each
-  content word is queried individually and a memory is recalled when it
-  shares at least two of them — "a skateboarder with a scar" finds Kai
-  without naming him. True semantic recall — paraphrase with no shared
-  words — still needs an embedding model, which is deliberately out of
-  scope here.
+- **Three recall legs, ranked honestly.** (1) Whole-word name match —
+  exact and instant. (2) Word-overlap: each content word is queried
+  individually and a memory is recalled when it shares at least two of
+  them, so "blue hair by the ocean" finds Kai without naming him.
+  (3) Semantic: a 33 MB local ONNX model (bge-small-en-v1.5, q8) embeds
+  the prompt and each character/style, recalled at cosine ≥ 0.50 —
+  "a boy doing tricks on a board at golden hour" finds Kai with zero
+  shared words. The model was picked by a four-model bake-off
+  (MiniLM-L6 lost: its negatives scored *above* its positives). The
+  semantic leg is additive and self-disabling: package missing, model
+  unavailable, or `STYLEMEMORY_SEMANTIC=0` all fall back to legs 1–2
+  with recall behavior unchanged.
 - **Style palette/tags don't round-trip** in the list view — they are stored in
   the memory content string rather than as structured fields. They do reach the
   prompt.

@@ -10,6 +10,11 @@
  *   style:<name>    — lowercase style name
  */
 import { getMemOS } from "./memos.js";
+import {
+  SEMANTIC_MIN_COSINE,
+  cosine,
+  embedBatch,
+} from "./semantic.js";
 import type { MemoryNode, ScoredMemory, SearchFilter } from "@mem-os/sdk";
 
 export interface Character {
@@ -258,6 +263,8 @@ export function contentWords(prompt: string): string[] {
  * Order (per approved correction #6):
  *   1. Whole-word case-insensitive name match against character/style names
  *   2. Word-overlap prose recall — per-word search plus a two-word floor
+ *   3. Semantic recall — local ONNX embeddings, cosine >= 0.50 (optional;
+ *      disables itself if the model cannot load)
  *
  * Also always includes active "avoid" and "prefer" traits.
  */
@@ -361,7 +368,44 @@ export async function recallMemories(prompt: string, limit = 10): Promise<Recall
     }
   }
 
-  // 3. Always include active avoid traits (they must shape every generation)
+  // 3. Semantic leg — additive and optional. The word-overlap leg above
+  // needs at least two shared content words, so a prompt that describes a
+  // character without reusing their stored words ("a boy doing tricks on a
+  // board") finds nothing. This leg embeds the prompt and each remaining
+  // character/style candidate with a small local ONNX model and recalls on
+  // cosine similarity. If the model cannot load (missing package, offline,
+  // broken ONNX) the leg disables itself for the process lifetime and the
+  // two legs above behave exactly as before — the demo never depends on
+  // this leg being alive.
+  //
+  // Threshold and model were chosen by measurement, not vibes: a 13-case
+  // bake-off (MiniLM-L6 / bge-small / e5-small / bge-base) showed only
+  // bge-small separates every positive from every negative
+  // (min positive 0.518 vs max negative 0.480 on this battery).
+  const candidates = [...chars, ...styles].filter((sm) => !recalled.has(sm.node.id));
+  if (candidates.length > 0) {
+    const vectors = await embedBatch([prompt, ...candidates.map((sm) => sm.node.content)]);
+    if (vectors && vectors.length === candidates.length + 1) {
+      const queryVec = vectors[0]!;
+      for (let i = 0; i < candidates.length; i += 1) {
+        const docVec = vectors[i + 1]!;
+        const score = cosine(queryVec, docVec);
+        if (score < SEMANTIC_MIN_COSINE) continue;
+        const sm = candidates[i]!;
+        if (recalled.has(sm.node.id)) continue;
+        recalled.set(sm.node.id, {
+          id: sm.node.id,
+          content: sm.node.content,
+          tags: sm.node.tags,
+          kind: (sm.node.metadata.kind as string) ?? "unknown",
+          reason: "semantic-search",
+          score,
+        });
+      }
+    }
+  }
+
+  // 4. Always include active avoid traits (they must shape every generation)
   const avoids = await memos.search({ namespace: "stylememory", tags: ["avoid"], limit: 20 });
   for (const sm of avoids) {
     if (!recalled.has(sm.node.id)) {

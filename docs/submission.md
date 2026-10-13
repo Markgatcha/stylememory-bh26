@@ -126,13 +126,18 @@ relevance floor; recall now relies on the two paths that carry real signal.
 
 ## What's next for StyleMemory
 
-- **Semantic recall.** Prose recall now works through app-layer
-  word-overlap — each content word is queried individually and a memory
-  is recalled when it shares at least two of them, so "a skateboarder
-  with a scar" finds Kai without naming him. What remains is true
-  semantic recall: paraphrase with no shared words, which needs an
-  embedding model (the local-hash fallback scores degenerate, and a
-  multi-GB download was rejected for this hackathon).
+- **Semantic recall — shipped.** Prose recall now works through three
+  legs: whole-word name match, app-layer word-overlap (each content word
+  is queried individually and a memory is recalled when it shares at
+  least two of them), and a 33 MB local ONNX embedding model
+  (bge-small-en-v1.5, q8) recalled at cosine ≥ 0.50 — so "a boy doing
+  tricks on a board at golden hour" finds Kai with zero shared words.
+  The model was picked by a four-way bake-off; the semantic leg is
+  additive and self-disabling (package missing or `STYLEMEMORY_SEMANTIC=0`
+  falls back to the two lexical legs with recall unchanged).
+- **A stronger embedding model.** bge-small is 33 MB; bge-base or a
+  Qwen3-embedding variant would widen the margin between related and
+  unrelated prompts. The leg is model-swappable in one line.
 - **Image-reference memory.** Attach a generated image to a character so
   future generations can condition on it directly, via Qwen's multi-reference
   support.

@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { COMFYUI_URL, ensureDirs, WORKFLOW_FILE, IMAGES_DIR } from "./paths.js";
 import { closeMemOS, getMemOS, NAMESPACE } from "./memory/memos.js";
+import { warmSemantic } from "./memory/semantic.js";
 import type { HealthResponse } from "./types.js";
 import { loadGenerations, updateGeneration } from "./generations.js";
 import {
@@ -359,6 +360,12 @@ app.post("/api/sheet", async (c) => {
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) }, (info) => {
   console.log(`[api] listening on http://127.0.0.1:${info.port}`);
 });
+
+// Warm the semantic-recall model in the background so the first generation
+// doesn't pay the model load (or the one-time ~33MB download) inline.
+// Fire-and-forget: if it fails, the semantic leg stays off and recall
+// falls back to name + word-overlap matching.
+warmSemantic();
 
 // Clean shutdown — close MemOS before exiting.
 process.on("SIGINT", async () => {

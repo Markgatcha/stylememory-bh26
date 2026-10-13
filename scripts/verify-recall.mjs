@@ -90,6 +90,46 @@ await check(
     r.some((m) => m.kind === "character" && m.reason === "text-search"),
 );
 
+// 6. Semantic leg: paraphrase with ZERO shared content words recalls Kai.
+await check(
+  "semantic: zero-overlap paraphrase recalls Kai",
+  "a boy doing tricks on a board at golden hour",
+  (r) =>
+    r.some((m) => m.kind === "character" && m.reason === "semantic-search"),
+);
+
+// 7. Hybrid recall: red + jacket are shared words here, so ANY leg firing
+//    is correct — this asserts the outcome, not the mechanism.
+await check(
+  "paraphrase-ish prompt recalls Kai",
+  "kid in a red jacket cruising the sidewalk",
+  (r) => r.some((m) => m.kind === "character"),
+);
+
+// 8. Semantic leg must NOT fire for unrelated subjects (the guard that
+//    keeps the contamination bug dead).
+await check(
+  "semantic: unrelated prompt stays silent",
+  "a dog playing in the park",
+  (r) => r.filter((m) => m.kind !== "avoid").length === 0,
+);
+
+// 9. Style recalled by description (word leg fires first here —
+//    high/contrast/sunset are shared — so assert the outcome).
+await check(
+  "style recalled by description",
+  "high contrast orange and purple sunset colors",
+  (r) => r.some((m) => m.kind === "style"),
+);
+
+// 10. Genuinely zero-overlap semantic recall for a STYLE (measured:
+//     cosine 0.633 — "dusk" never appears in the style content).
+await check(
+  "semantic: style zero-overlap paraphrase",
+  "deep orange dusk over the city skyline",
+  (r) => r.some((m) => m.kind === "style" && m.reason === "semantic-search"),
+);
+
 await memos.close();
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
