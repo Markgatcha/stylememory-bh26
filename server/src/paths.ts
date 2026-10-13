@@ -10,7 +10,9 @@ export const PROJECT_ROOT = resolve(__dirname, "..", "..");
 export const DATA_DIR = join(PROJECT_ROOT, "data");
 export const IMAGES_DIR = join(DATA_DIR, "images");
 export const GENERATIONS_FILE = join(DATA_DIR, "generations.json");
-export const DB_PATH = join(DATA_DIR, "stylememory.db");
+/** Overridable so tests/verification can run against a scratch DB. */
+export const DB_PATH =
+  process.env.STYLEMEMORY_DB ?? join(DATA_DIR, "stylememory.db");
 export const WORKFLOW_FILE = join(PROJECT_ROOT, "workflow", "qwen-image.json");
 
 export const COMFYUI_URL = process.env.COMFYUI_URL ?? "http://127.0.0.1:8188";

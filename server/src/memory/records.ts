@@ -220,12 +220,44 @@ export interface RecalledMemory {
 }
 
 /**
+ * Function words dropped before word-overlap recall. This is exactly
+ * MemOS's own FTS stopword set (src/storage/sqlite.ts FTS_STOPWORDS),
+ * mirrored so a word we query is always a word MemOS indexes.
+ */
+const STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+  "does", "did", "do", "has", "have", "had", "of", "in", "on", "at",
+  "to", "for", "and", "or", "not", "no", "with", "by", "from", "as",
+  "it", "its", "this", "that", "these", "those", "what", "when",
+  "where", "who", "whom", "which", "how", "why", "can", "could",
+  "will", "would", "should", "shall", "may", "might", "must", "about",
+  "into", "over", "after", "before", "they", "them", "their", "theirs",
+  "he", "she", "his", "her", "hers", "we", "us", "our", "ours", "you",
+  "your", "yours", "i", "me", "my", "mine", "if",
+]);
+
+/**
+ * Split a prompt into content words for word-overlap recall.
+ * Same shape as MemOS's FTS tokenizer: lowercase, split on
+ * non-alphanumerics, drop single characters and function words. Falls
+ * back to the raw tokens when everything is a stopword, so a prompt of
+ * pure function words still produces a usable (if weak) query set.
+ */
+export function contentWords(prompt: string): string[] {
+  const tokens = prompt
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1);
+  const words = tokens.filter((t) => !STOPWORDS.has(t));
+  return words.length > 0 ? words : tokens;
+}
+
+/**
  * Recall relevant memories for a prompt.
  *
  * Order (per approved correction #6):
  *   1. Whole-word case-insensitive name match against character/style names
- *   2. Tag-based search for characters and styles
- *   3. Full-text search across all memories
+ *   2. Word-overlap prose recall — per-word search plus a two-word floor
  *
  * Also always includes active "avoid" and "prefer" traits.
  */
@@ -257,7 +289,7 @@ export async function recallMemories(prompt: string, limit = 10): Promise<Recall
     }
   }
 
-  // 2. REMOVED: unconditional "top by importance" fallback.
+  // ── REMOVED (historical): unconditional "top by importance" fallback.
   //
   // It caused a real bug: this search returns a constant score of 1.0 for
   // every node regardless of the query (verified against MemOS 1.6.26), and
@@ -268,33 +300,68 @@ export async function recallMemories(prompt: string, limit = 10): Promise<Recall
   //
   // Recall now relies on the two paths that carry real signal:
   //   (a) whole-word name match against stored character/style names
-  //   (b) MemOS full-text search with a relevance floor
+  //   (b) word-overlap prose recall with a two-word floor (below)
   // Plus avoid-traits, which are always-on by design.
 
-  // 3. Full-text search — only keep results with meaningful relevance.
-  // The raw score is cosine similarity in [0,1]; a query with no real
-  // overlap with a memory still returns a small non-zero score, so a bare
-  // "top N" pull would inject irrelevant memories into unrelated prompts.
-  // Threshold at 0.25 — below that the match is noise.
-  const textResults = await memos.search({
-    namespace: "stylememory",
-    query: prompt,
-    limit,
-  });
-  for (const sm of textResults) {
-    if (!recalled.has(sm.node.id) && sm.score >= 0.25) {
-      recalled.set(sm.node.id, {
-        id: sm.node.id,
-        content: sm.node.content,
-        tags: sm.node.tags,
-        kind: (sm.node.metadata.kind as string) ?? "unknown",
+  // 2. Word-overlap prose recall (replaces the dead full-text leg).
+  //
+  // The old code ran `memos.search({ query: prompt })` and kept results
+  // scoring >= 0.25. On the released MemOS 1.6.26 SDK that leg returns
+  // NOTHING for prose queries: the FTS builder wraps the whole query as
+  // a single quoted phrase ("kai skateboarding at sunset"), and a phrase
+  // only matches content that contains it verbatim — which stored
+  // character descriptions never do. That is the "semantic recall is the
+  // biggest gap" limitation the README documents. (The tokenized fix
+  // exists in MemOS main — commit 8c6a47f, Aug 15 — but was never
+  // released past 1.6.26, and publishing is not available here.)
+  //
+  // So recall tokenizes at the app layer instead: each content word is
+  // queried on its own (a one-word "phrase" is an exact token match),
+  // and each memory accumulates the set of prompt words it shares.
+  //
+  // Precision rule: a memory is only recalled when it shares at least
+  // TWO distinct content words with the prompt. One shared word is a
+  // collision, not relevance — "a red fox in a forest" shares only
+  // "red" with a character who owns a red jacket, and letting that
+  // through is exactly the contamination bug this app already shipped
+  // once (Kai's jacket on the fox, dev.log commit 7a243a7). The
+  // name-match leg above carries the named case, so the two-word floor
+  // does not cost the recall that actually matters.
+  const words = contentWords(prompt);
+  if (words.length > 0) {
+    const hits = new Map<string, { sm: ScoredMemory; matched: Set<string> }>();
+    for (const word of words) {
+      const results = await memos.search({
+        namespace: "stylememory",
+        query: word,
+        limit: 50,
+      });
+      for (const sm of results) {
+        let hit = hits.get(sm.node.id);
+        if (!hit) {
+          hit = { sm, matched: new Set() };
+          hits.set(sm.node.id, hit);
+        }
+        hit.matched.add(word);
+      }
+    }
+    for (const [id, hit] of hits) {
+      if (recalled.has(id)) continue;
+      if (hit.matched.size < 2) continue; // collision, not relevance
+      const score = hit.matched.size / words.length;
+      if (score < 0.25) continue;
+      recalled.set(id, {
+        id,
+        content: hit.sm.node.content,
+        tags: hit.sm.node.tags,
+        kind: (hit.sm.node.metadata.kind as string) ?? "unknown",
         reason: "text-search",
-        score: sm.score,
+        score,
       });
     }
   }
 
-  // 4. Always include active avoid traits (they must shape every generation)
+  // 3. Always include active avoid traits (they must shape every generation)
   const avoids = await memos.search({ namespace: "stylememory", tags: ["avoid"], limit: 20 });
   for (const sm of avoids) {
     if (!recalled.has(sm.node.id)) {
